@@ -50,7 +50,6 @@ impl ParseError {
     return ParseError { idx, line, col };
   }
 }
-ParseError::fromIndex(3)
 
 pub fn parse (input: &str) -> Result<SourceAnalysis, ParseError> {
   let mut analysis = SourceAnalysis {
