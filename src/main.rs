@@ -44,7 +44,7 @@ pub struct ParseError {
 }
 
 impl ParseError {
-  pub fn fromIndex (source: &'a str, idx: usize) -> ParseError {
+  pub fn fromIndex (source: &str, idx: usize) -> ParseError {
     let line: usize = 0; // source.slice(0, wasm.e()).split('\n').length
     let col: usize = 0; // wasm.e() - source.lastIndexOf('\n', wasm.e() - 1
     return ParseError { idx, line, col };
