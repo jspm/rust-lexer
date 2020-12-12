@@ -27,7 +27,7 @@ pub struct Export {
 
 impl Export {
   pub fn to_string<'a> (self: &Export, source: &'a str) -> &'a str {
-    return &source[self.start..self.end];
+    &source[self.start..self.end]
   }
 }
 
@@ -44,14 +44,14 @@ pub struct ParseError {
 }
 
 impl ParseError {
-  pub fn fromIndex (source: &str, idx: usize) -> ParseError {
+  pub fn from_index(source: &str, idx: usize) -> ParseError {
     let line: usize = 0; // source.slice(0, wasm.e()).split('\n').length
     let col: usize = 0; // wasm.e() - source.lastIndexOf('\n', wasm.e() - 1
-    return ParseError { idx, line, col };
+    ParseError { idx, line, col }
   }
 }
 
-pub fn parse (input: &str) -> Result<SourceAnalysis, ParseError> {
+pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
   let mut analysis = SourceAnalysis {
     imports: Vec::with_capacity(20),
     exports: Vec::with_capacity(20),
@@ -60,10 +60,10 @@ pub fn parse (input: &str) -> Result<SourceAnalysis, ParseError> {
   let mut templateStack = Vec::<usize>::with_capacity(5);
   let mut openTokenIndexStack = Vec::<usize>::with_capacity(50);
 
-  let mut templateStackDepth: usize = 0;
-  let mut openTokenDepth: usize = 0;
-  let mut templateDepth: isize = -1;
-  let mut lastTokenIndex: usize;
+  let mut template_stack_depth: usize = 0;
+  let mut open_token_depth: usize = 0;
+  let mut template_depth: isize = -1;
+  let mut last_token_index: usize;
 
   let source = input.as_bytes();
 
@@ -116,11 +116,11 @@ pub fn parse (input: &str) -> Result<SourceAnalysis, ParseError> {
       },
       _ => {}
     }
-    lastTokenIndex = i;
+    last_token_index = i;
   }
 
-  if templateDepth != -1 || openTokenDepth {
-    return Err(ParseError::fromIndex(source, idx));
+  if template_depth != -1 || open_token_depth {
+    return Err(ParseError::from_index(source, idx));
   }
 
   // analysis.exports.push(Export { statement_start: 0, start: 0, end: 5, dynamic: -1 }
@@ -128,9 +128,8 @@ pub fn parse (input: &str) -> Result<SourceAnalysis, ParseError> {
   Ok(analysis)
 }
 
-pub fn main () {
+pub fn main() {
   let source = "hello world";
-
   let analysis = parse(source).expect("Parse error");
 
   for import in analysis.imports {
@@ -178,14 +177,14 @@ export { d as a, p as b, z as c, r as d, q }"#;
   }
 
   #[test]
-  fn invalid_export () {
+  fn invalid_export() {
     let source = r#"export { a = };"#;
     let err = parse(source).err().expect("Should error");
     assert_eq!(err.idx, 11);
   }
 
   #[test]
-  fn single_parse_cases () {
+  fn single_parse_cases() {
     parse("export { x }").unwrap();
     parse("'asdf'").unwrap();
     parse("/asdf/").unwrap();
@@ -195,7 +194,7 @@ export { d as a, p as b, z as c, r as d, q }"#;
   }
 
   #[test]
-  fn simple_export_with_unicode_conversions () {
+  fn simple_export_with_unicode_conversions() {
     let source = r#"export var p𓀀s,q"#;
     let SourceAnalysis { imports, exports, .. } = parse(source).unwrap();
     assert_eq!(imports.len(), 0);
