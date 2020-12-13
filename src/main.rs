@@ -1,5 +1,7 @@
 use std::convert::TryFrom;
 
+const MAX_TEMPLATE_DEPTH = 65536;
+
 pub enum Import {
   Dynamic(DynamicImport),
   Static(StaticImport),
@@ -63,7 +65,7 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
   let mut template_stack_depth: usize = 0;
   let mut open_token_depth: usize = 0;
   let mut template_depth: isize = -1;
-  let mut last_token_index: usize;
+  let mut last_token_index: usize = 0;
 
   let source = input.as_bytes();
 
@@ -92,18 +94,47 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
       'i' => {
 
       },
-      '(' => {
 
+      '(' => {
+        open_token_index_stack[open_token_depth] = last_token_index;
+        open_token_depth += 1;
       },
+
       ')' => {
+        
+
+
+        if open_token_depth == 0 {
+          return Err(ParseError::from_index(source_str, idx));
+        }
+        open_token_depth -= 1;
+        //TODO
+
+        break;
 
       },
       '{' => {
 
       },
-      '}' => {
 
+      '}' => {
+        if open_token_depth == 0 {
+          return Err(ParseError::from_index(source_str, idx));
+        }
+
+        open_token_depth -= 1;
+        if (open_token_depth == template_depth) {
+          template_stack_depth -= 1;
+          template_depth = template_stack[template_stack_depth];
+          // templateString();
+        }
+        else {
+          if (template_depth != MAX_TEMPLATE_DEPTH && open_token_depth < template_depth)
+            return Err(ParseError::from_index(source_str, idx));
+        }
+        break;
       },
+
       '\'' => {
 
       },
@@ -122,9 +153,11 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
   }
 
   if (template_depth != -1) || (open_token_depth > 0) {
-    // return Err(ParseError::from_index(source, idx));
+    let source_str = match std::str::from_utf8(source) {
+      Ok(res) => res,
+      Err(err) => "[error: source can't be parsed]"
+    };
 
-    let source_str = std::str::from_utf8(source).unwrap();
     return Err(ParseError::from_index(source_str, idx));
   }
 
@@ -161,7 +194,7 @@ mod tests {
   use super::*;
 
   #[test]
-  fn invalid_string () {
+  fn invalid_string() {
     let source = r#"import './export.js';
 
 import d from './export.js';
