@@ -57,8 +57,8 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
     exports: Vec::with_capacity(20),
   };
 
-  let mut templateStack = Vec::<usize>::with_capacity(5);
-  let mut openTokenIndexStack = Vec::<usize>::with_capacity(50);
+  let mut template_stack = Vec::<usize>::with_capacity(5);
+  let mut open_token_index_stack = Vec::<usize>::with_capacity(50);
 
   let mut template_stack_depth: usize = 0;
   let mut open_token_depth: usize = 0;
@@ -70,6 +70,8 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
   let mut first = false;
   let mut i: usize = 0;
   let len = source.len();
+  let idx = 0; //TODO
+
   while i < len - 1 {
     if first {
       first = false;
@@ -119,8 +121,11 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
     last_token_index = i;
   }
 
-  if template_depth != -1 || open_token_depth {
-    return Err(ParseError::from_index(source, idx));
+  if (template_depth != -1) || (open_token_depth > 0) {
+    // return Err(ParseError::from_index(source, idx));
+
+    let source_str = std::str::from_utf8(source).unwrap();
+    return Err(ParseError::from_index(source_str, idx));
   }
 
   // analysis.exports.push(Export { statement_start: 0, start: 0, end: 5, dynamic: -1 }
