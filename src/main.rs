@@ -1,6 +1,6 @@
-mod parse_error;
-
 use parse_error::ParseError;
+
+mod parse_error;
 
 pub enum Import {
     Dynamic(DynamicImport),
@@ -44,10 +44,10 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
         exports: Vec::with_capacity(20),
     };
 
-    let mut templateStack = Vec::<usize>::with_capacity(5);
-    let mut openTokenIndexStack = Vec::<usize>::with_capacity(50);
+    let mut _template_stack = Vec::<usize>::with_capacity(5);
+    let mut _open_token_index_stack = Vec::<usize>::with_capacity(50);
 
-    let mut template_stack_depth: usize = 0;
+    let mut _template_stack_depth: usize = 0;
     let mut open_token_depth: usize = 0;
     let mut template_depth: isize = -1;
     let mut last_token_index: usize;
@@ -123,25 +123,126 @@ pub fn main() {
     }
 }
 
-// Note: non-asii BR and whitespace checks omitted for perf / footprint
+fn read_to_ws_or_punctuator(src: &[u8], i: usize) -> u8 {
+    // This would probably be more "rusty", but I'm not sure about performance of it,
+    // we can test it later when we add benchmarks.
+    //
+    // src[i..]
+    //     .iter()
+    //     .find(|&&ch| is_br_or_ws(ch) || is_punctuator(ch))
+    //     .unwrap_or(src.last().expect("src is empty"));
+
+    let mut ch: u8 = src[i];
+    loop {
+        if is_br_or_ws(ch) || is_punctuator(ch) {
+            return ch;
+        }
+
+        ch = match src.get(i + 1) {
+            None => break,
+            Some(ch) => *ch,
+        }
+    }
+    return ch;
+}
+
+// Note: non-ascii BR and whitespace checks omitted for perf / footprint
 // if there is a significant user need this can be reconsidered
-fn isBr(c: char) -> bool {
+fn is_br(c: char) -> bool {
     return c == '\r' || c == '\n';
 }
 
-fn isBrOrWs(c: u8) -> bool {
+fn is_br_or_ws(c: u8) -> bool {
     return c > 8 && c < 14 || c == 32 || c == 160;
 }
 
-fn isBrOrWsOrPunctuatorNotDot(c: u8) -> bool {
-    return c > 8 && c < 14 || c == 32 || c == 160 || isPunctuator(c) && c as char != '.';
+fn is_br_or_ws_or_punctuator_not_dot(c: u8) -> bool {
+    return c > 8 && c < 14 || c == 32 || c == 160 || is_punctuator(c) && c as char != '.';
 }
 
-fn keywordStart(src: &[u8], i: usize) -> bool {
-    return i == 0 || isBrOrWsOrPunctuatorNotDot(src[i - 1]);
+fn keyword_start(src: &[u8], i: usize) -> bool {
+    return i == 0 || is_br_or_ws_or_punctuator_not_dot(src[i - 1]);
 }
 
-fn isPunctuator(ch: u8) -> bool {
+fn is_expression_keyword(src: &[u8], i: usize) -> bool {
+    match src[i] as char {
+        'd' => match src[i - 1] as char {
+            // void
+            'i' => read_preceding_keyword(src, i - 2, "vo"),
+            // yield
+            'l' => read_preceding_keyword(src, i - 2, "yie"),
+            _ => false,
+        },
+        'e' => match src[i - 1] as char {
+            's' => match src[i - 2] as char {
+                // else
+                'l' => read_preceding_keyword(src, i - 3, "e"),
+                // case
+                'a' => read_preceding_keyword(src, i - 3, "c"),
+                _ => false,
+            },
+            // delete
+            't' => read_preceding_keyword(src, i - 2, "dele"),
+            _ => false,
+        },
+        'f' => {
+            if src[i - 1] as char != 'o' || src[i - 2] as char != 'e' {
+                false
+            } else {
+                match src[i - 3] as char {
+                    // instanceof
+                    'c' => read_preceding_keyword(src, i - 4, "instan"),
+                    // typeof
+                    'p' => read_preceding_keyword(src, i - 4, "ty"),
+                    _ => false,
+                }
+            }
+        }
+        // in, return
+        'n' => {
+            read_preceding_keyword(src, i - 1, "i") || read_preceding_keyword(src, i - 1, "retur")
+        }
+
+        // do
+        'o' => read_preceding_keyword(src, i - 1, "d"),
+        // debugger
+        'r' => read_preceding_keyword(src, i - 1, "debugge"),
+        // await
+        't' => read_preceding_keyword(src, i - 1, "awai"),
+        'w' => match src[i - 1] as char {
+            // new
+            'e' => read_preceding_keyword(src, i - 2, "n"),
+            // throw
+            'o' => read_preceding_keyword(src, i - 2, "thr"),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn is_paren_keyword(src: &[u8], i: usize) -> bool {
+    return match src[i] as char {
+        'e' => read_preceding_keyword(src, i, "whil"),
+        'r' => read_preceding_keyword(src, i, "fo"),
+        'f' => read_preceding_keyword(src, i, "i"),
+        _ => false,
+    };
+}
+
+fn read_preceding_keyword(src: &[u8], i: usize, keyword_prefix: &str) -> bool {
+    let length = keyword_prefix.len();
+    if i < length - 1 {
+        return false;
+    }
+    if src[(i + 1 - length)..i + 1].as_ref() == keyword_prefix.as_bytes() {
+        if i == length - 1 || is_br_or_ws_or_punctuator_not_dot(src[i - length - 1]) {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_punctuator(ch: u8) -> bool {
     // 23 possible punctuator endings: !%&()*+,-./:;<=>?[]^{}|~
     return ch as char == '!'
         || ch as char == '%'
@@ -154,7 +255,7 @@ fn isPunctuator(ch: u8) -> bool {
         || ch > 122 && ch < 127;
 }
 
-fn isExpressionPunctuator(ch: u8) -> bool {
+fn is_expression_punctuator(ch: u8) -> bool {
     // 20 possible expression endings: !%&(*+,-.:;<=>?[^{|~
     return ch as char == '!'
         || ch as char == '%'
@@ -166,15 +267,16 @@ fn isExpressionPunctuator(ch: u8) -> bool {
         || ch > 122 && ch < 127 && ch as char != '}';
 }
 
-fn isExpressionTerminator(src: &[u8], i: usize) -> bool {
-    // detects:
-    // ; ) -1 finally
-    // as all of these followed by a { will indicate a statement brace
-    // in future we will need: "catch" (optional catch parameters)
-    //                         "do" (do expressions)
+// detects:
+// => ; ) finally catch else class X
+// as all of these followed by a { will indicate a statement brace
+fn is_expression_terminator(src: &[u8], i: usize) -> bool {
     match src[i] as char {
         ';' | ')' => true,
-        'y' => src[i - 6..i].eq("finall".as_bytes()) && isBrOrWsOrPunctuatorNotDot(src[i - 7]),
+        'y' => read_preceding_keyword(src, i, "finall"),
+        '>' => src[i - 1] as char == '=',
+        'h' => read_preceding_keyword(src, i, "catc"),
+        'e' => read_preceding_keyword(src, i, "els"),
         _ => false,
     }
 }
@@ -182,6 +284,25 @@ fn isExpressionTerminator(src: &[u8], i: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_is_expression_keyword() {
+        // debugger, delete, do, else, in, instanceof, new,
+        // return, throw, typeof, void, yield ,await
+        assert!(is_expression_keyword("debugger".as_bytes(), 7));
+        assert!(is_expression_keyword("delete".as_bytes(), 5));
+        assert!(is_expression_keyword("do".as_bytes(), 1));
+        assert!(is_expression_keyword("else".as_bytes(), 3));
+        assert!(is_expression_keyword("in".as_bytes(), 1));
+        assert!(is_expression_keyword("instanceof".as_bytes(), 9));
+        assert!(is_expression_keyword("new".as_bytes(), 2));
+        assert!(is_expression_keyword("return".as_bytes(), 5));
+        assert!(is_expression_keyword("throw".as_bytes(), 4));
+        assert!(is_expression_keyword("typeof".as_bytes(), 5));
+        assert!(is_expression_keyword("void".as_bytes(), 3));
+        assert!(is_expression_keyword("yield".as_bytes(), 4));
+        assert!(is_expression_keyword("await".as_bytes(), 4));
+    }
 
     #[test]
     fn invalid_string() {
