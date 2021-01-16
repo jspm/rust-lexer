@@ -6,6 +6,11 @@ pub struct ParseError {
 }
 
 impl ParseError {
+    pub fn from_source_and_index_u8(src: &[u8], idx: usize) -> ParseError {
+        unsafe {
+            return ParseError::from_source_and_index(std::str::from_utf8_unchecked(src), idx);
+        }
+    }
     pub fn from_source_and_index(source: &str, idx: usize) -> ParseError {
         let substring = match source.get(0..idx + 1) {
             None => {
