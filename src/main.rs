@@ -5,6 +5,7 @@ mod parse_error;
 pub enum Import {
     Dynamic(DynamicImport),
     Static(StaticImport),
+    Meta(MetaImport),
 }
 
 pub struct DynamicImport {
@@ -15,6 +16,13 @@ pub struct DynamicImport {
 }
 
 pub struct StaticImport {
+    pub statement_start: usize,
+    pub start: usize,
+    pub end: usize,
+    pub statement_end: usize,
+}
+
+pub struct MetaImport {
     pub statement_start: usize,
     pub start: usize,
     pub end: usize,
@@ -41,6 +49,7 @@ pub struct ParseState<'a> {
     template_depth: usize,
     open_token_depth: usize,
     last_token_index: usize,
+    analysis: SourceAnalysis,
 }
 
 pub struct SourceAnalysis {
@@ -49,29 +58,28 @@ pub struct SourceAnalysis {
 }
 
 pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
-    let mut analysis = SourceAnalysis {
-        imports: Vec::with_capacity(20),
-        exports: Vec::with_capacity(20),
-    };
-
     let mut state = ParseState {
         src: input.as_bytes(),
         i: 0,
-        template_stack: Vec::<isize>::with_capacity(10),
+        template_stack: Vec::<usize>::with_capacity(10),
         open_token_index_stack: Vec::<usize>::with_capacity(50),
-        template_depth: -1,
-        open_token_depth: 0,
+        template_depth: 0,
+        open_token_depth: 1,
         last_token_index: 0,
+        analysis: SourceAnalysis {
+            imports: Vec::with_capacity(20),
+            exports: Vec::with_capacity(20),
+        }
     };
 
     let mut first = false;
     
     let len = state.src.len();
-    while i < len - 1 {
+    while state.i < len - 1 {
         if first {
             first = false;
         } else {
-            i += 1;
+            state.i += 1;
         }
         let ch = state.src[state.i];
 
@@ -95,13 +103,13 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
         state.last_token_index = state.i;
     }
 
-    if state.template_depth != -1 || state.open_token_index_stack.len() > 0 {
+    if state.template_depth != 0 || state.open_token_index_stack.len() > 0 {
         return Err(ParseError::from_source_and_index(input, state.i));
     }
 
     // analysis.exports.push(Export { statement_start: 0, start: 0, end: 5, dynamic: -1 }
     // analysis.imports.push(Import { start: 6, end: 11 }
-    Ok(analysis)
+    Ok(state.analysis)
 }
 
 pub fn main() {
@@ -112,10 +120,12 @@ pub fn main() {
         let start = match &import {
             Import::Dynamic(impt) => impt.start,
             Import::Static(impt) => impt.start,
+            Import::Meta(impt) => impt.start,
         };
         let end = match &import {
             Import::Dynamic(impt) => impt.end,
             Import::Static(impt) => impt.end,
+            Import::Meta(impt) => impt.end,
         };
         println!(
             "Import: {}",
@@ -133,55 +143,100 @@ pub fn main() {
     }
 }
 
-fn try_parse_import_statement (state: &ParseState) -> Result<(), ParseError> {
-    let startPos = state.i;
+fn try_parse_import_statement (state: &mut ParseState) -> Result<(), ParseError> {
+    let start_index = state.i;
   
-    *i += 6;
+    state.i += 6;
   
-    match comment_whitespace(src, i)? as char {
+    let ch = comment_whitespace(state)? as char;
+    match ch {
       // dynamic import
       '(' => {
-        *open_token_depth += 1;
-        *open_token_index_stack.get(*open_token_depth).expect("out of capacity") = startPos;
-        if (*lastTokenPos == '.')
-          return;
+        state.open_token_depth += 1;
+        *state.open_token_index_stack.get(state.open_token_depth).expect("out of capacity") = start_index;
+        if state.src[state.last_token_index] as char == '.' {
+          return Ok(());
+        }
         // dynamic import indicated by positive d
-        addImport(startPos, pos + 1, 0, startPos);
-        return;
+        state.analysis.imports.push(Import::Dynamic(DynamicImport {
+            statement_start: start_index,
+            start: state.i + 1,
+            end: 0,
+            dynamic: start_index as isize
+        }));
+        return Ok(());
       },
       // import.meta
       '.' => {
-        pos++;
-        ch = commentWhitespace();
+        state.i += 1;
+        let ch = comment_whitespace(state)?;
         // import.meta indicated by d == -2
-        if (ch == 'm' && str_eq3(pos + 1, 'e', 't', 'a') && *lastTokenPos != '.')
-          addImport(startPos, startPos, pos + 4, IMPORT_META);
-        return;
-      },
-      
-      '"' | '\'' | '{' | '*' => {
-        // no space after "import" -> not an import keyword
-        if (pos == startPos + 6)
-            break;
-            // import statement only permitted at base-level
-            if (openTokenDepth != 0) {
-            pos--;
-            return;
-            }
-            while (pos < end) {
-            ch = *pos;
-            if (ch == '\'' || ch == '"') {
-                readImportString(startPos, ch);
-                return;
-            }
-            pos++;
-            }
-            syntaxError();
+        if ch == 'm' && state.src[state.i + 1..state.i + 3].as_ref() == "eta".as_bytes() && state.src[state.last_token_index] as char != '.' {
+            state.analysis.imports.push(Import::Meta(MetaImport {
+                statement_start: start_index,
+                start: start_index,
+                end: state.i + 4,
+                statement_end: state.i + 4,
+            }));
         }
+        return Ok(());
+      },
+
+      _ => {
+          // no space after "import" -> not an import keyword
+          if ch != '"' && ch != '\'' && ch != '{' && ch != '*' && state.i == start_index + 6 {
+              return Ok(());
+          }
+
+          // import statement only permitted at base-level
+            if state.open_token_depth != 0 {
+                state.i -= 1;
+                return Ok(());
+            }
+            while state.i < state.src.len() {
+                let ch = state.src[state.i] as char;
+                if ch == '\'' || ch == '"' {
+                    read_import_string(start_index, ch, state);
+                    return Ok(());
+                }
+                state.i += 1;
+            }
+            return Err(ParseError::from_source_and_index_u8(state.src, state.i));
+      }
     }
 }
 
-fn comment_whitespace (state: &ParseState) -> Result<char, ParseError> {
+fn read_import_string (statement_start: usize, ch: char, state: &mut ParseState) -> Result<(), ParseError> {
+    if ch == '\'' {
+        state.i += 1;
+        let start = state.i;
+        single_quote_string(state)?;
+        state.analysis.imports.push(Import::Static(StaticImport {
+            statement_start,
+            start,
+            end: state.i,
+            statement_end: state.i,
+        }));
+        return Ok(());
+      }
+      else if ch == '"' {
+        state.i += 1;
+        let start = state.i;
+        double_quote_string(state)?;
+        state.analysis.imports.push(Import::Static(StaticImport {
+            statement_start,
+            start,
+            end: state.i,
+            statement_end: state.i,
+        }));
+        return Ok(());
+      }
+      else {
+        return Err(ParseError::from_source_and_index_u8(state.src, state.i));
+      }
+}
+
+fn comment_whitespace (state: &mut ParseState) -> Result<char, ParseError> {
     while state.i < state.src.len() {
         let ch = state.src[state.i] as char;
         if ch as char == '/' {
@@ -204,7 +259,7 @@ fn comment_whitespace (state: &ParseState) -> Result<char, ParseError> {
 }
 
 fn template_string(
-    state: &ParseState
+    state: &mut ParseState
 ) -> Result<(), ParseError> {
     while state.i < state.src.len() {
         match state.src[state.i] as char {
@@ -225,7 +280,7 @@ fn template_string(
     return Err(ParseError::from_source_and_index_u8(state.src, state.i));
 }
 
-fn block_comment(state: &ParseState) -> Result<(), ParseError> {
+fn block_comment(state: &mut ParseState) -> Result<(), ParseError> {
     state.i += 1;
     while state.i < state.src.len() {
         state.i += 1;
@@ -237,7 +292,7 @@ fn block_comment(state: &ParseState) -> Result<(), ParseError> {
     return Err(ParseError::from_source_and_index_u8(state.src, state.i));
 }
 
-fn line_comment(state: &ParseState) -> Result<(), ParseError> {
+fn line_comment(state: &mut ParseState) -> Result<(), ParseError> {
     while state.i < state.src.len() {
         state.i += 1;
         match state.src[state.i] as char {
@@ -248,7 +303,7 @@ fn line_comment(state: &ParseState) -> Result<(), ParseError> {
     return Err(ParseError::from_source_and_index_u8(state.src, state.i));
 }
 
-fn single_quote_string(state: &ParseState) -> Result<(), ParseError> {
+fn single_quote_string(state: &mut ParseState) -> Result<(), ParseError> {
     while state.i < state.src.len() {
         state.i += 1;
         match state.src[state.i] as char {
@@ -261,7 +316,7 @@ fn single_quote_string(state: &ParseState) -> Result<(), ParseError> {
     return Err(ParseError::from_source_and_index_u8(state.src, state.i));
 }
 
-fn double_quote_string(state: &ParseState) -> Result<(), ParseError> {
+fn double_quote_string(state: &mut ParseState) -> Result<(), ParseError> {
     while state.i < state.src.len() {
         state.i += 1;
         match state.src[state.i] as char {
@@ -274,7 +329,7 @@ fn double_quote_string(state: &ParseState) -> Result<(), ParseError> {
     return Err(ParseError::from_source_and_index_u8(state.src, state.i));
 }
 
-fn regex_character_class(state: &ParseState) -> Result<(), ParseError> {
+fn regex_character_class(state: &mut ParseState) -> Result<(), ParseError> {
     while state.i < state.src.len() {
         state.i += 1;
         match state.src[state.i] as char {
@@ -287,7 +342,7 @@ fn regex_character_class(state: &ParseState) -> Result<(), ParseError> {
     return Err(ParseError::from_source_and_index_u8(state.src, state.i));
 }
 
-fn regular_expression(state: &ParseState) -> Result<(), ParseError> {
+fn regular_expression(state: &mut ParseState) -> Result<(), ParseError> {
     while state.i < state.src.len() {
         state.i += 1;
         match state.src[state.i] as char {
@@ -301,7 +356,7 @@ fn regular_expression(state: &ParseState) -> Result<(), ParseError> {
     return Err(ParseError::from_source_and_index_u8(state.src, state.i));
 }
 
-fn read_to_ws_or_punctuator(state: &ParseState) -> u8 {
+fn read_to_ws_or_punctuator(state: &mut ParseState) -> u8 {
     // This would probably be more "rusty", but I'm not sure about performance of it,
     // we can test it later when we add benchmarks.
     //
