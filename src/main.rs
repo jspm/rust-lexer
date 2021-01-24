@@ -29,8 +29,8 @@ pub struct MetaImport {
     pub statement_end: usize,
 }
 
+#[derive(Debug, Eq, PartialEq)]
 pub struct Export {
-    pub statement_start: usize,
     pub start: usize,
     pub end: usize,
 }
@@ -44,8 +44,8 @@ impl Export {
 pub struct ParseState<'a> {
     src: &'a [u8],
     i: usize,
-    template_stack: Vec::<usize>,
-    open_token_index_stack: Vec::<usize>,
+    template_stack: Vec<usize>,
+    open_token_index_stack: Vec<usize>,
     template_depth: usize,
     open_token_depth: usize,
     last_token_index: usize,
@@ -69,11 +69,11 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
         analysis: SourceAnalysis {
             imports: Vec::with_capacity(20),
             exports: Vec::with_capacity(20),
-        }
+        },
     };
 
     let mut first = false;
-    
+
     let len = state.src.len();
     while state.i < len - 1 {
         if first {
@@ -88,7 +88,14 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
         }
 
         match ch as char {
-            'e' => {}
+            'e' => {
+                if state.open_token_depth == 0
+                    && keyword_start(state.src, state.i)
+                    && &state.src[state.i + 1..state.i + 5] == b"xport"
+                {
+                    todo!("try_parse_export_statement(state)")
+                }
+            }
             'i' => {}
             '(' => {}
             ')' => {}
@@ -143,52 +150,58 @@ pub fn main() {
     }
 }
 
-fn try_parse_import_statement (state: &mut ParseState) -> Result<(), ParseError> {
+fn try_parse_import_statement(state: &mut ParseState) -> Result<(), ParseError> {
     let start_index = state.i;
-  
+
     state.i += 6;
-  
+
     let ch = comment_whitespace(state)? as char;
     match ch {
-      // dynamic import
-      '(' => {
-        state.open_token_depth += 1;
-        *state.open_token_index_stack.get(state.open_token_depth).expect("out of capacity") = start_index;
-        if state.src[state.last_token_index] as char == '.' {
-          return Ok(());
-        }
-        // dynamic import indicated by positive d
-        state.analysis.imports.push(Import::Dynamic(DynamicImport {
-            statement_start: start_index,
-            start: state.i + 1,
-            end: 0,
-            dynamic: start_index as isize
-        }));
-        return Ok(());
-      },
-      // import.meta
-      '.' => {
-        state.i += 1;
-        let ch = comment_whitespace(state)?;
-        // import.meta indicated by d == -2
-        if ch == 'm' && state.src[state.i + 1..state.i + 3].as_ref() == "eta".as_bytes() && state.src[state.last_token_index] as char != '.' {
-            state.analysis.imports.push(Import::Meta(MetaImport {
+        // dynamic import
+        '(' => {
+            state.open_token_depth += 1;
+            *state
+                .open_token_index_stack
+                .get_mut(state.open_token_depth)
+                .expect("out of capacity") = start_index;
+            if state.src[state.last_token_index] == b'.' {
+                return Ok(());
+            }
+            // dynamic import indicated by positive d
+            state.analysis.imports.push(Import::Dynamic(DynamicImport {
                 statement_start: start_index,
-                start: start_index,
-                end: state.i + 4,
-                statement_end: state.i + 4,
+                start: state.i + 1,
+                end: 0,
+                dynamic: start_index as isize,
             }));
+            return Ok(());
         }
-        return Ok(());
-      },
+        // import.meta
+        '.' => {
+            state.i += 1;
+            let ch = comment_whitespace(state)?;
+            // import.meta indicated by d == -2
+            if ch == 'm'
+                && &state.src[state.i + 1..state.i + 3] == b"eta"
+                && state.src[state.last_token_index] != b'.'
+            {
+                state.analysis.imports.push(Import::Meta(MetaImport {
+                    statement_start: start_index,
+                    start: start_index,
+                    end: state.i + 4,
+                    statement_end: state.i + 4,
+                }));
+            }
+            return Ok(());
+        }
 
-      _ => {
-          // no space after "import" -> not an import keyword
-          if ch != '"' && ch != '\'' && ch != '{' && ch != '*' && state.i == start_index + 6 {
-              return Ok(());
-          }
+        _ => {
+            // no space after "import" -> not an import keyword
+            if ch != '"' && ch != '\'' && ch != '{' && ch != '*' && state.i == start_index + 6 {
+                return Ok(());
+            }
 
-          // import statement only permitted at base-level
+            // import statement only permitted at base-level
             if state.open_token_depth != 0 {
                 state.i -= 1;
                 return Ok(());
@@ -202,11 +215,39 @@ fn try_parse_import_statement (state: &mut ParseState) -> Result<(), ParseError>
                 state.i += 1;
             }
             return Err(ParseError::from_source_and_index_u8(state.src, state.i));
-      }
+        }
     }
 }
 
-fn read_import_string (statement_start: usize, ch: char, state: &mut ParseState) -> Result<(), ParseError> {
+/// Parses an export specifier coming after the `as` keyword,
+/// and advances the parsing state to the position until after the next non-whitespace or non-comment char.
+fn read_export_as(state: &mut ParseState) -> Result<(), ParseError> {
+    let ch = state.src[state.i];
+
+    if ch == b'a' {
+        state.i += 2;
+        comment_whitespace(state)?;
+        let start_pos = state.i;
+        read_to_ws_or_punctuator(state);
+        let end_pos = state.i;
+        comment_whitespace(state)?;
+
+        if state.i != start_pos {
+            state.analysis.exports.push(Export {
+                start: start_pos,
+                end: end_pos,
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn read_import_string(
+    statement_start: usize,
+    ch: char,
+    state: &mut ParseState,
+) -> Result<(), ParseError> {
     if ch == '\'' {
         state.i += 1;
         let start = state.i;
@@ -218,8 +259,7 @@ fn read_import_string (statement_start: usize, ch: char, state: &mut ParseState)
             statement_end: state.i,
         }));
         return Ok(());
-      }
-      else if ch == '"' {
+    } else if ch == '"' {
         state.i += 1;
         let start = state.i;
         double_quote_string(state)?;
@@ -230,37 +270,35 @@ fn read_import_string (statement_start: usize, ch: char, state: &mut ParseState)
             statement_end: state.i,
         }));
         return Ok(());
-      }
-      else {
+    } else {
         return Err(ParseError::from_source_and_index_u8(state.src, state.i));
-      }
+    }
 }
 
-fn comment_whitespace (state: &mut ParseState) -> Result<char, ParseError> {
+/// Consumes the all the whitespace or comments until the first character
+/// that is not a part of either of them, advances the parsing state to that position,
+/// and returns the whitespace char (`\0`).
+fn comment_whitespace(state: &mut ParseState) -> Result<char, ParseError> {
     while state.i < state.src.len() {
         let ch = state.src[state.i] as char;
-        if ch as char == '/' {
+        if ch == '/' {
             let next_ch = state.src[state.i + 1] as char;
             if next_ch as char == '/' {
                 line_comment(state)?;
-            }
-            else if next_ch == '*' {
+            } else if next_ch == '*' {
                 block_comment(state)?;
-            }
-            else {
+            } else {
                 return Ok(ch);
             }
-        }
-        else if !is_br_or_ws(ch as u8) {
+        } else if !is_br_or_ws(ch as u8) {
             return Ok(ch);
         }
+        state.i += 1;
     }
     return Ok('\0');
 }
 
-fn template_string(
-    state: &mut ParseState
-) -> Result<(), ParseError> {
+fn template_string(state: &mut ParseState) -> Result<(), ParseError> {
     while state.i < state.src.len() {
         match state.src[state.i] as char {
             '$' => {
@@ -512,6 +550,30 @@ fn is_expression_terminator(src: &[u8], i: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_read_export_as() {
+        // TODO: we should probably refactor the functions that are taking the whole state struct,
+        //       they are hard to test well because of the complicated setup.
+        let mut state = ParseState {
+            src: b"as bar  }",
+            i: 0,
+            template_stack: vec![],
+            open_token_index_stack: vec![],
+            template_depth: 0,
+            open_token_depth: 0,
+            last_token_index: 0,
+            analysis: SourceAnalysis {
+                imports: vec![],
+                exports: vec![],
+            },
+        };
+
+        read_export_as(&mut state);
+
+        assert_eq!(state.analysis.exports, vec![Export { start: 3, end: 6 }]);
+        assert_eq!(state.i, 8);
+    }
 
     #[test]
     fn test_is_expression_keyword() {
