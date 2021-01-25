@@ -2,18 +2,21 @@ use parse_error::ParseError;
 
 mod parse_error;
 
+#[derive(Debug)]
 pub enum Import {
     Dynamic(DynamicImport),
     Static(StaticImport),
     Meta(MetaImport),
 }
 
+#[derive(Debug)]
 pub struct DynamicImport {
     pub statement_start: usize,
     pub start: usize,
     pub end: usize,
 }
 
+#[derive(Debug)]
 pub struct StaticImport {
     pub statement_start: usize,
     pub start: usize,
@@ -21,6 +24,7 @@ pub struct StaticImport {
     pub statement_end: usize,
 }
 
+#[derive(Debug)]
 pub struct MetaImport {
     pub statement_start: usize,
     pub start: usize,
@@ -40,6 +44,7 @@ impl Export {
     }
 }
 
+#[derive(Debug)]
 pub struct ParseState<'a> {
     src: &'a [u8],
     i: usize,
@@ -54,6 +59,7 @@ pub struct ParseState<'a> {
     analysis: SourceAnalysis,
 }
 
+#[derive(Debug)]
 pub struct SourceAnalysis {
     pub imports: Vec<Import>,
     pub exports: Vec<Export>,
@@ -108,7 +114,7 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
         },
     };
 
-    let mut first = false;
+    let mut first = true;
     let mut skip_set_last_token = false;
     let mut last_slash_was_division = false;
 
@@ -237,12 +243,19 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
                     } else {
                         state.src[state.last_token_index] as char
                     };
-                    if is_expression_punctuator(last_token as u8)
-                        && !(last_token == '.'
-                            && (state.src[state.last_token_index - 1] >= b'0'
-                                && state.src[state.last_token_index - 1] <= b'9'))
-                        && !(last_token == '+' && state.src[state.last_token_index - 1] == b'+')
-                        && !(last_token == '-' && state.src[state.last_token_index - 1] == b'-')
+                    if last_token == '\u{0}'
+                        || is_expression_punctuator(last_token as u8)
+                            && !(last_token == '.'
+                                && (state.last_token_index > 1
+                                    && state.src[state.last_token_index - 1] >= b'0'
+                                    && state.last_token_index > 1
+                                    && state.src[state.last_token_index - 1] <= b'9'))
+                            && !(last_token == '+'
+                                && state.last_token_index > 1
+                                && state.src[state.last_token_index - 1] == b'+')
+                            && !(last_token == '-'
+                                && state.last_token_index > 1
+                                && state.src[state.last_token_index - 1] == b'-')
                         || last_token == ')'
                             && is_paren_keyword(
                                 state.src,
@@ -255,7 +268,6 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
                             ) || state.open_class_index_stack[state.open_token_depth])
                         || is_expression_keyword(state.src, state.last_token_index)
                         || last_token == '/' && last_slash_was_division
-                        || last_token == '\0'
                     {
                         regular_expression(&mut state)?;
                         last_slash_was_division = false;
@@ -523,6 +535,10 @@ fn read_export_as(
     mut start_pos: usize,
     mut end_pos: usize,
 ) -> Result<u8, ParseError> {
+    if state.i >= state.src.len() {
+        return Ok(0);
+    }
+
     let ch = state.src[state.i];
 
     if ch == b'a' {
@@ -616,7 +632,7 @@ fn template_string(state: &mut ParseState) -> Result<(), ParseError> {
             _ => (),
         }
     }
-    return Err(ParseError::from_source_and_index_u8(state.src, state.i));
+    Err(ParseError::from_source_and_index_u8(state.src, state.i))
 }
 
 fn block_comment(state: &mut ParseState) -> Result<(), ParseError> {
@@ -628,22 +644,22 @@ fn block_comment(state: &mut ParseState) -> Result<(), ParseError> {
             return Ok(());
         }
     }
-    return Err(ParseError::from_source_and_index_u8(state.src, state.i));
+    Err(ParseError::from_source_and_index_u8(state.src, state.i))
 }
 
 fn line_comment(state: &mut ParseState) -> Result<(), ParseError> {
-    while state.i < state.src.len() {
+    while state.i < state.src.len() - 1 {
         state.i += 1;
         match state.src[state.i] as char {
             '\n' | '\r' => return Ok(()),
             _ => (),
         }
     }
-    return Err(ParseError::from_source_and_index_u8(state.src, state.i));
+    Ok(())
 }
 
 fn single_quote_string(state: &mut ParseState) -> Result<(), ParseError> {
-    while state.i < state.src.len() {
+    while state.i < state.src.len() - 1 {
         state.i += 1;
         match state.src[state.i] as char {
             '\'' => return Ok(()),
@@ -652,11 +668,11 @@ fn single_quote_string(state: &mut ParseState) -> Result<(), ParseError> {
             _ => (),
         }
     }
-    return Err(ParseError::from_source_and_index_u8(state.src, state.i));
+    Err(ParseError::from_source_and_index_u8(state.src, state.i))
 }
 
 fn double_quote_string(state: &mut ParseState) -> Result<(), ParseError> {
-    while state.i < state.src.len() {
+    while state.i < state.src.len() - 1 {
         state.i += 1;
         match state.src[state.i] as char {
             '"' => return Ok(()),
@@ -669,7 +685,7 @@ fn double_quote_string(state: &mut ParseState) -> Result<(), ParseError> {
 }
 
 fn regex_character_class(state: &mut ParseState) -> Result<(), ParseError> {
-    while state.i < state.src.len() {
+    while state.i < state.src.len() - 1 {
         state.i += 1;
         match state.src[state.i] as char {
             ']' => return Ok(()),
@@ -682,7 +698,7 @@ fn regex_character_class(state: &mut ParseState) -> Result<(), ParseError> {
 }
 
 fn regular_expression(state: &mut ParseState) -> Result<(), ParseError> {
-    while state.i < state.src.len() {
+    while state.i < state.src.len() - 1 {
         state.i += 1;
         match state.src[state.i] as char {
             '/' => return Ok(()),
@@ -913,7 +929,7 @@ export { d as a, p as b, z as c, r as d, q }"#;
 
         let err = parse(source).err().unwrap();
         assert_eq!(err.line, 9);
-        assert_eq!(err.col, 5);
+        assert_eq!(err.col, 4);
     }
 
     #[test]
@@ -945,7 +961,7 @@ export { d as a, p as b, z as c, r as d, q }"#;
         assert_eq!(exports[1].to_string(source), "q");
     }
 
-    //   #[test]
+    // #[test]
     //   fn simple_import () {
     //     let source = r#"
     //       import test from "test";
