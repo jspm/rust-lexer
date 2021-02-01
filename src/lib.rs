@@ -18,6 +18,15 @@ pub struct DynamicImport {
     pub end: usize,
 }
 
+impl DynamicImport {
+    pub fn module_specifier_expression_range(&self) -> Range<usize> {
+        self.start..self.end
+    }
+    pub fn expression_range(&self) -> Range<usize> {
+        self.start..self.end
+    }
+}
+
 #[derive(Debug)]
 pub struct StaticImport {
     pub statement_start: usize,
@@ -28,11 +37,10 @@ pub struct StaticImport {
 
 impl StaticImport {
     pub fn module_specifier_range(&self) -> Range<usize> {
-        return self.start..self.end;
+        self.start..self.end
     }
-
     pub fn statement_range(&self) -> Range<usize> {
-        return self.statement_start..self.statement_end;
+        self.statement_start..self.statement_end
     }
 }
 
@@ -44,7 +52,7 @@ pub struct MetaImport {
 
 impl MetaImport {
     pub fn expression_range(&self) -> Range<usize> {
-        return self.start..self.end;
+        self.start..self.end
     }
 }
 
@@ -169,7 +177,9 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
                 // dynamic import followed by { is not a dynamic import (so remove)
                 // this is a sneaky way to get around { import () {} } v { import () }
                 // block / object ambiguity without a parser (assuming source is valid)
+                dbg!(&state.last_dynamic_import);
                 if let Some(di) = state.last_dynamic_import {
+                    dbg!(&state.analysis.imports, state.last_token_index);
                     if state.analysis.imports.len() == di + 1 {
                         match &state.analysis.imports[di] {
                             Import::Dynamic(import) => {
@@ -186,6 +196,10 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
                     .resize(state.open_token_depth + 1, false);
                 state.open_class_index_stack[state.open_token_depth] = state.next_brace_is_class;
                 state.next_brace_is_class = false;
+                state
+                    .open_token_index_stack
+                    .resize(state.open_token_depth + 1, 0);
+                state.open_token_index_stack[state.open_token_depth] = state.last_token_index;
                 state.open_token_depth += 1;
             }
             '}' => {
@@ -293,21 +307,23 @@ fn try_parse_import_statement(state: &mut ParseState) -> Result<(), ParseError> 
     match ch {
         // dynamic import
         '(' => {
-            state.open_token_depth += 1;
-            dbg!(&state.open_token_index_stack);
-            *state
+            state
                 .open_token_index_stack
-                .get_mut(state.open_token_depth)
-                .expect("out of capacity") = start_index;
+                .resize(state.open_token_depth + 1, 0);
+            state.open_token_index_stack[state.open_token_depth] = start_index;
+            state.open_token_depth += 1;
             if state.src[state.last_token_index] == b'.' {
                 return Ok(());
             }
             // dynamic import indicated by positive d
+            let idx = state.analysis.imports.len();
             state.analysis.imports.push(Import::Dynamic(DynamicImport {
                 statement_start: start_index,
                 start: state.i + 1,
                 end: 0,
             }));
+            state.last_dynamic_import = Some(idx);
+
             return Ok(());
         }
         // import.meta
@@ -1166,66 +1182,68 @@ export { d as a, p as b, z as c, r as d, q }"#;
         assert_eq!(imports.len(), 0);
     }
 
-    //   #[test]
-    //   fn dynamic_import_edge_cases () {
-    //     let source = r#"
-    //       ({
-    //         // not a dynamic import!
-    //         import(not1) {}
-    //       }
-    //       {
-    //         // is a dynamic import!
-    //         import(is1);
-    //       }
-    //       a.
-    //       // not a dynamic import!
-    //       import(not2);
-    //       a.
-    //       b()
-    //       // is a dynamic import!
-    //       import(is2);
+    #[test]
+    fn dynamic_import_edge_cases() {
+        let source = r#"
+          ({
+            // not a dynamic import!
+            import(not1) {}
+          });
+          {
+            // is a dynamic import!
+            import(is1);
+          }
+          a.
+          // not a dynamic import!
+          import(not2);
+          a.
+          b()
+          // is a dynamic import!
+          import(is2);
+          
+          const myObject = {
+            import: ()=> import(some_url)
+          }
+        "#;
+        let SourceAnalysis { imports, exports } = parse(source).unwrap();
+        assert_eq!(imports.len(), 3);
 
-    //       const myObject = {
-    //         import: ()=> import(some_url)
-    //       }
-    //     "#;
-    //     let SourceAnalysis { imports, exports } = parse(source).unwrap();
-    //     assert_eq!(imports.len(), 3);
-    //     var { s, e, ss, se, d } = imports[0];
-    //     assert_eq!(ss, d);
-    //     assert_eq!(se, 0);
-    //     assert_eq!(source.substr(d, 6), "import");
-    //     assert_eq!(source.slice(s, e), "is1");
+        let import1 = match &imports[0] {
+            Import::Dynamic(i) => i,
+            _ => panic!("Expected Import::Dynamic"),
+        };
+        dbg!(&import1);
+        assert_eq!(&source[import1.module_specifier_expression_range()], "is1");
+        //
+        // var { s, e, ss, se, d } = imports[1];
+        // assert_eq!(ss, d);
+        // assert_eq!(se, 0);
+        // assert_eq!(source.slice(s, e), "is2");
+        //
+        // var { s, e, ss, se, d } = imports[2];
+        // assert_eq!(ss, d);
+        // assert_eq!(se, 0);
+        // assert_eq!(source.slice(s, e), "some_url");
+    }
 
-    //     var { s, e, ss, se, d } = imports[1];
-    //     assert_eq!(ss, d);
-    //     assert_eq!(se, 0);
-    //     assert_eq!(source.slice(s, e), "is2");
+    #[test]
+    fn import_after_code() {
+        let source = r#"
+          export function f () {
+            g();
+          }
 
-    //     var { s, e, ss, se, d } = imports[2];
-    //     assert_eq!(ss, d);
-    //     assert_eq!(se, 0);
-    //     assert_eq!(source.slice(s, e), "some_url");
-    //   }
-
-    //   #[test]
-    //   fn import_after_code () {
-    //     let source = r#"
-    //       export function f () {
-    //         g();
-    //       }
-
-    //       import { g } from './test-circular2.js';
-    //     "#;
-    //     let SourceAnalysis { imports, exports } = parse(source).unwrap();
-    //     assert_eq!(imports.len(), 1);
-    //     const { s, e, ss, se, d } = imports[0];
-    //     assert_eq!(d, -1);
-    //     assert_eq!(source.slice(s, e), "./test-circular2.js");
-    //     assert_eq!(source.slice(ss, se), `import { g } from './test-circular2.js'`);
-    //     assert_eq!(exports.len(), 1);
-    //     assert_eq!(exports[0], "f");
-    //   }
+          import { g } from './test-circular2.js';
+        "#;
+        let SourceAnalysis { imports, exports } = parse(source).unwrap();
+        assert_eq!(imports.len(), 1);
+        // const { s, e, ss, se, d } = imports[0];
+        // assert_eq!(d, -1);
+        // assert_eq!(source.slice(s, e), "./test-circular2.js");
+        // assert_eq!(source.slice(ss, se), `import { g } from './test-circular2.js'`);
+        // assert_eq!(exports.len(), 1);
+        // assert_eq!(exports[0], "f");
+    }
 
     //   #[test]
     //   fn comments () {
