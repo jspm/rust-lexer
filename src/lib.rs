@@ -1,6 +1,8 @@
-use parse_error::ParseError;
+use std::ops::Range;
 
-mod parse_error;
+use error::ParseError;
+
+mod error;
 
 #[derive(Debug)]
 pub enum Import {
@@ -24,12 +26,26 @@ pub struct StaticImport {
     pub statement_end: usize,
 }
 
+impl StaticImport {
+    pub fn module_specifier_range(&self) -> Range<usize> {
+        return self.start..self.end;
+    }
+
+    pub fn statement_range(&self) -> Range<usize> {
+        return self.statement_start..self.statement_end;
+    }
+}
+
 #[derive(Debug)]
 pub struct MetaImport {
-    pub statement_start: usize,
     pub start: usize,
     pub end: usize,
-    pub statement_end: usize,
+}
+
+impl MetaImport {
+    pub fn expression_range(&self) -> Range<usize> {
+        return self.start..self.end;
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -39,8 +55,8 @@ pub struct Export {
 }
 
 impl Export {
-    pub fn to_string<'a>(self: &Export, source: &'a str) -> &'a str {
-        &source[self.start..self.end]
+    pub fn export_specifier_range(&self) -> Range<usize> {
+        return self.start..self.end;
     }
 }
 
@@ -63,37 +79,6 @@ pub struct ParseState<'a> {
 pub struct SourceAnalysis {
     pub imports: Vec<Import>,
     pub exports: Vec<Export>,
-}
-
-pub fn main() {
-    let source = "hello world";
-    let analysis = parse(source).expect("Parse error");
-
-    for import in analysis.imports {
-        let start = match &import {
-            Import::Dynamic(impt) => impt.start,
-            Import::Static(impt) => impt.start,
-            Import::Meta(impt) => impt.start,
-        };
-        let end = match &import {
-            Import::Dynamic(impt) => impt.end,
-            Import::Static(impt) => impt.end,
-            Import::Meta(impt) => impt.end,
-        };
-        println!(
-            "Import: {}",
-            std::str::from_utf8(&source.as_bytes()[start..end]).expect("Invalid utf8")
-        );
-    }
-
-    for export in analysis.exports {
-        let start = export.start;
-        let end = export.end;
-        println!(
-            "Export: {}",
-            std::str::from_utf8(&source.as_bytes()[start..end]).expect("Invalid utf8")
-        );
-    }
 }
 
 pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
@@ -127,7 +112,7 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
         }
         let ch = state.src[state.i];
 
-        if ch == ' ' as u8 || ch < 14 && ch > 8 {
+        if ch == b' ' || ch < 14 && ch > 8 {
             continue;
         }
 
@@ -156,6 +141,7 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
                 }
             }
             '(' => {
+                dbg!("(", &state.open_token_index_stack);
                 state
                     .open_token_index_stack
                     .resize(state.open_token_depth + 1, 0);
@@ -163,6 +149,7 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
                 state.open_token_depth += 1;
             }
             ')' => {
+                dbg!(")", &state.open_token_index_stack);
                 if state.open_token_depth == 0 {
                     return Err(ParseError::from_source_and_index(input, state.i));
                 }
@@ -178,6 +165,7 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
                 }
             }
             '{' => {
+                dbg!("{", &state.open_token_index_stack);
                 // dynamic import followed by { is not a dynamic import (so remove)
                 // this is a sneaky way to get around { import () {} } v { import () }
                 // block / object ambiguity without a parser (assuming source is valid)
@@ -201,16 +189,16 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
                 state.open_token_depth += 1;
             }
             '}' => {
+                dbg!("}", &state.open_token_index_stack);
                 if state.open_token_depth == 0 {
                     return Err(ParseError::from_source_and_index(input, state.i));
                 }
+                state.open_token_depth -= 1;
                 if let Some(td) = state.template_depth {
                     if state.open_token_depth == td {
-                        state.open_token_depth -= 1;
                         state.template_depth = state.template_stack.pop();
                         template_string(&mut state)?;
                     } else {
-                        state.open_token_depth -= 1;
                         if state.open_token_depth < td {
                             return Err(ParseError::from_source_and_index(input, state.i));
                         }
@@ -221,6 +209,7 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
                 single_quote_string(&mut state)?;
             }
             '"' => {
+                dbg!("parse");
                 double_quote_string(&mut state)?;
             }
             '/' => {
@@ -288,7 +277,7 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
         }
     }
 
-    if state.template_depth.is_some() || state.open_token_index_stack.len() > 0 {
+    if state.template_depth.is_some() || state.open_token_depth > 0 {
         return Err(ParseError::from_source_and_index(input, state.i));
     }
 
@@ -305,6 +294,7 @@ fn try_parse_import_statement(state: &mut ParseState) -> Result<(), ParseError> 
         // dynamic import
         '(' => {
             state.open_token_depth += 1;
+            dbg!(&state.open_token_index_stack);
             *state
                 .open_token_index_stack
                 .get_mut(state.open_token_depth)
@@ -324,16 +314,14 @@ fn try_parse_import_statement(state: &mut ParseState) -> Result<(), ParseError> 
         '.' => {
             state.i += 1;
             let ch = comment_whitespace(state)?;
-            // import.meta indicated by d == -2
             if ch == 'm'
-                && &state.src[state.i + 1..state.i + 3] == b"eta"
-                && state.src[state.last_token_index] != b'.'
+                && &state.src[state.i + 1..state.i + 4] == b"eta"
+                && (state.last_token_index == usize::MAX
+                    || state.src[state.last_token_index] != b'.')
             {
                 state.analysis.imports.push(Import::Meta(MetaImport {
-                    statement_start: start_index,
                     start: start_index,
                     end: state.i + 4,
-                    statement_end: state.i + 4,
                 }));
             }
             return Ok(());
@@ -354,11 +342,12 @@ fn try_parse_import_statement(state: &mut ParseState) -> Result<(), ParseError> 
                 let ch = state.src[state.i] as char;
                 if ch == '\'' || ch == '"' {
                     read_import_string(start_index, ch, state)?;
+                    dbg!(*&state.src[state.i] as char);
                     return Ok(());
                 }
                 state.i += 1;
             }
-            return Err(ParseError::from_source_and_index_u8(state.src, state.i));
+            return Err(ParseError::from_source_and_index(state.src, state.i));
         }
     }
 }
@@ -490,21 +479,20 @@ fn try_parse_export_statement(state: &mut ParseState) -> Result<(), ParseError> 
                     break;
                 }
                 if state.i == start_pos {
-                    return Err(ParseError::from_source_and_index_u8(state.src, state.i));
+                    return Err(ParseError::from_source_and_index(state.src, state.i));
                 }
                 if state.i > state.src.len() {
-                    return Err(ParseError::from_source_and_index_u8(state.src, state.i));
+                    return Err(ParseError::from_source_and_index(state.src, state.i));
                 }
             }
             state.i += 1;
-            comment_whitespace(state)?;
-            state.i += 1;
-            comment_whitespace(state)?;
-            read_export_as(state, state.i, state.i)? as char;
             ch = comment_whitespace(state)?;
             if ch == 'f' && &state.src[state.i + 1..state.i + 4] == b"rom" {
                 state.i += 4;
                 read_import_string(s_start_pos, comment_whitespace(state)?, state)?;
+                dbg!("export", *&state.src[state.i] as char);
+            } else {
+                state.i -= 1;
             }
         }
 
@@ -512,19 +500,18 @@ fn try_parse_export_statement(state: &mut ParseState) -> Result<(), ParseError> 
         '*' => {
             state.i += 1;
             comment_whitespace(state)?;
-            state.i += 1;
-            comment_whitespace(state)?;
             read_export_as(state, state.i, state.i)? as char;
             ch = comment_whitespace(state)?;
             if ch == 'f' && &state.src[state.i + 1..state.i + 4] == b"rom" {
                 state.i += 4;
                 read_import_string(s_start_pos, comment_whitespace(state)?, state)?;
+            } else {
+                state.i -= 1;
             }
         }
 
         _ => {}
     }
-    state.i -= 1;
     return Ok(());
 }
 
@@ -573,22 +560,23 @@ fn read_import_string(
             statement_start,
             start,
             end: state.i,
-            statement_end: state.i,
+            statement_end: state.i + 1,
         }));
         return Ok(());
     } else if ch == '"' {
         state.i += 1;
         let start = state.i;
+        dbg!("read_import");
         double_quote_string(state)?;
         state.analysis.imports.push(Import::Static(StaticImport {
             statement_start,
             start,
             end: state.i,
-            statement_end: state.i,
+            statement_end: state.i + 1,
         }));
         return Ok(());
     } else {
-        return Err(ParseError::from_source_and_index_u8(state.src, state.i));
+        return Err(ParseError::from_source_and_index(state.src, state.i));
     }
 }
 
@@ -632,7 +620,7 @@ fn template_string(state: &mut ParseState) -> Result<(), ParseError> {
             _ => (),
         }
     }
-    Err(ParseError::from_source_and_index_u8(state.src, state.i))
+    Err(ParseError::from_source_and_index(state.src, state.i))
 }
 
 fn block_comment(state: &mut ParseState) -> Result<(), ParseError> {
@@ -644,7 +632,7 @@ fn block_comment(state: &mut ParseState) -> Result<(), ParseError> {
             return Ok(());
         }
     }
-    Err(ParseError::from_source_and_index_u8(state.src, state.i))
+    Err(ParseError::from_source_and_index(state.src, state.i))
 }
 
 fn line_comment(state: &mut ParseState) -> Result<(), ParseError> {
@@ -668,20 +656,27 @@ fn single_quote_string(state: &mut ParseState) -> Result<(), ParseError> {
             _ => (),
         }
     }
-    Err(ParseError::from_source_and_index_u8(state.src, state.i))
+    Err(ParseError::from_source_and_index(state.src, state.i))
 }
 
 fn double_quote_string(state: &mut ParseState) -> Result<(), ParseError> {
+    dbg!(&state.i);
     while state.i < state.src.len() - 1 {
         state.i += 1;
         match state.src[state.i] as char {
-            '"' => return Ok(()),
+            '"' => {
+                return Ok(());
+            }
             '\\' => state.i += 1,
             '\n' | '\r' => break,
-            _ => (),
+            _ => {}
         }
     }
-    return Err(ParseError::from_source_and_index_u8(state.src, state.i));
+    return Err(ParseError::from_source_index_and_msg(
+        state.src,
+        state.i,
+        "unterminated double quote string",
+    ));
 }
 
 fn regex_character_class(state: &mut ParseState) -> Result<(), ParseError> {
@@ -694,7 +689,7 @@ fn regex_character_class(state: &mut ParseState) -> Result<(), ParseError> {
             _ => (),
         }
     }
-    return Err(ParseError::from_source_and_index_u8(state.src, state.i));
+    return Err(ParseError::from_source_and_index(state.src, state.i));
 }
 
 fn regular_expression(state: &mut ParseState) -> Result<(), ParseError> {
@@ -708,7 +703,7 @@ fn regular_expression(state: &mut ParseState) -> Result<(), ParseError> {
             _ => (),
         }
     }
-    return Err(ParseError::from_source_and_index_u8(state.src, state.i));
+    return Err(ParseError::from_source_and_index(state.src, state.i));
 }
 
 fn read_to_ws_or_punctuator(state: &mut ParseState) -> u8 {
@@ -867,30 +862,7 @@ fn is_expression_terminator(src: &[u8], i: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // #[test]
-    // fn test_read_export_as() {
-    //     // TODO: we should probably refactor the functions that are taking the whole state struct,
-    //     //       they are hard to test well because of the complicated setup.
-    //     let mut state = ParseState {
-    //         src: b"as bar  }",
-    //         i: 0,
-    //         template_stack: vec![],
-    //         open_token_index_stack: vec![],
-    //         template_depth: 0,
-    //         open_token_depth: 0,
-    //         last_token_index: 0,
-    //         analysis: SourceAnalysis {
-    //             imports: vec![],
-    //             exports: vec![],
-    //         },
-    //     };
-
-    //     read_export_as(&mut state, 0, 0);
-
-    //     assert_eq!(state.analysis.exports, vec![Export { start: 3, end: 6 }]);
-    //     assert_eq!(state.i, 8);
-    // }
+    use crate::error::pretty_error;
 
     #[test]
     fn test_is_expression_keyword() {
@@ -957,174 +929,242 @@ export { d as a, p as b, z as c, r as d, q }"#;
         } = parse(source).unwrap();
         assert_eq!(imports.len(), 0);
         assert_eq!(exports.len(), 2);
-        assert_eq!(exports[0].to_string(source), "p𓀀s");
-        assert_eq!(exports[1].to_string(source), "q");
+        assert_eq!(&source[exports[0].export_specifier_range()], "p𓀀s");
+        assert_eq!(&source[exports[1].export_specifier_range()], "q");
     }
 
-    // #[test]
-    //   fn simple_import () {
-    //     let source = r#"
-    //       import test from "test";
-    //       console.log(test);
-    //     "#;
-    //     let SourceAnalysis { imports, exports } = parse(source).unwrap();
-    //     assert_eq!(imports.len(), 1);
-    //     const { s, e, ss, se, d } = imports[0];
-    //     assert_eq!(d, -1);
-    //     assert_eq!(source.slice(s, e), "test");
-    //     assert_eq!(source.slice(ss, se), "import test from "test"");
-    //     assert_eq!(exports.len(), 0);
-    //   }
+    #[test]
+    fn simple_import() {
+        let source = r#"
+          import test from "test";
+          console.log(test);
+        "#;
+        let SourceAnalysis { imports, exports } = parse(source).unwrap();
+        assert_eq!(imports.len(), 1);
+        let StaticImport {
+            statement_start,
+            start,
+            end,
+            statement_end,
+        } = match &imports[0] {
+            Import::Static(i) => i,
+            _ => panic!("Expected Import::Static"),
+        };
+        assert_eq!(&source[*start..*end], "test");
+        assert_eq!(
+            &source[*statement_start..*statement_end],
+            r#"import test from "test""#
+        );
+        assert_eq!(exports.len(), 0);
+    }
 
-    //   #[test]
-    //   fn import_export_with_comments () {
-    //     let source = r#"
+    #[test]
+    fn import_export_with_comments() {
+        let source = r#"
 
-    //       import/* 'x' */ 'a';
+          import/* 'x' */ 'a';
 
-    //       import /* 'x' */ 'b';
+          import /* 'x' */ 'b';
 
-    //       export var z  /*  */
-    //       export {
-    //         a,
-    //         // b,
-    //         /* c */ d
-    //       };
-    //     "#;
-    //     let SourceAnalysis { imports, exports } = parse(source).unwrap();
-    //     assert_eq!(imports.len(), 2);
-    //     assert_eq!(source[imports[0].start..imports[0].end], "a");
-    //     assert_eq!(source.slice(imports[0].statement_start, imports[0].statement_end), `import/* 'x' */ 'a'`);
-    //     assert_eq!(source.slice(imports[1].s, imports[1].e), "b");
-    //     assert_eq!(source.slice(imports[1].statement_start, imports[1].statement_end), `import /* 'x' */ 'b'`);
-    //     assert_eq!(exports.toString(), "z,a,d");
-    //   }
+          export var z  /*  */
+          export {
+            a,
+            // b,
+            /* c */ d
+          };
+        "#;
+        let SourceAnalysis { imports, exports } = parse(source).unwrap();
+        assert_eq!(imports.len(), 2);
+        let import1 = match &imports[0] {
+            Import::Static(i) => i,
+            _ => panic!("Expected Import::Static"),
+        };
+        assert_eq!(&source[import1.module_specifier_range()], "a");
+        assert_eq!(&source[import1.statement_range()], "import/* 'x' */ 'a'");
+        let import2 = match &imports[1] {
+            Import::Static(i) => i,
+            _ => panic!("Expected Import::Static"),
+        };
+        assert_eq!(&source[import2.module_specifier_range()], "b");
+        assert_eq!(&source[import2.statement_range()], "import /* 'x' */ 'b'");
+        assert_eq!(&source[exports[0].export_specifier_range()], "z");
+        assert_eq!(&source[exports[1].export_specifier_range()], "a");
+        assert_eq!(&source[exports[2].export_specifier_range()], "d");
+    }
 
-    //   #[test]
-    //   fn exported_function () {
-    //     let source = r#"
-    //       export function a𓀀 () {
+    #[test]
+    fn exported_function() {
+        let source = r#"
+          export function a𓀀 () {
 
-    //       }
-    //       export class Q{
+          }
+          export class Q{
 
-    //       }
-    //     "#;
-    //     const [, exports] = parse(source);
-    //     assert_eq!(exports[0], "a𓀀");
-    //     assert_eq!(exports[1], "Q");
-    //   }
+          }
+        "#;
+        let SourceAnalysis { exports, .. } = parse(source).unwrap();
+        assert_eq!(exports.len(), 2);
+        assert_eq!(&source[exports[0].export_specifier_range()], "a𓀀");
+        assert_eq!(&source[exports[1].export_specifier_range()], "Q");
+    }
 
-    //   #[test]
-    //   fn export_destructuring () {
-    //     let source = r#"
-    //       export const { a, b } = foo;
+    #[test]
+    fn export_destructuring() {
+        let source = r#"
+          export const { a, b } = foo;
 
-    //       export { ok };
-    //     "#;
-    //     const [, exports] = parse(source);
-    //     assert_eq!(exports[0], "ok");
-    //   }
+          export { ok };
+        "#;
+        let SourceAnalysis { exports, .. } = parse(source).unwrap();
+        assert_eq!(exports.len(), 1);
+        assert_eq!(&source[exports[0].export_specifier_range()], "ok");
+    }
 
-    //   #[test]
-    //   fn minified_import_syntax () {
-    //     let source = r#"import{TemplateResult as t}from"lit-html";import{a as e}from"./chunk-4be41b30.js";export{j as SVGTemplateResult,i as TemplateResult,g as html,h as svg}from"./chunk-4be41b30.js";window.JSCompiler_renameProperty='asdf';"#;
-    //     let SourceAnalysis { imports, exports } = parse(source).unwrap();
-    //     assert_eq!(imports.len(), 3);
-    //     assert_eq!(imports[0].s, 32);
-    //     assert_eq!(imports[0].e, 40);
-    //     assert_eq!(imports[0].statement_start, 0);
-    //     assert_eq!(imports[0].statement_end, 41);
-    //     assert_eq!(imports[1].s, 61);
-    //     assert_eq!(imports[1].e, 80);
-    //     assert_eq!(imports[1].statement_start, 42);
-    //     assert_eq!(imports[1].statement_end, 81);
-    //     assert_eq!(imports[2].s, 156);
-    //     assert_eq!(imports[2].e, 175);
-    //     assert_eq!(imports[2].statement_start, 82);
-    //     assert_eq!(imports[2].statement_end, 176);
-    //   }
+    #[test]
+    fn minified_import_syntax() {
+        let source = r#"import{TemplateResult as t}from"lit-html";import{a as e}from"./chunk-4be41b30.js";export{j as SVGTemplateResult,i as TemplateResult,g as html,h as svg}from"./chunk-4be41b30.js";window.JSCompiler_renameProperty='asdf';"#;
+        let SourceAnalysis { imports, .. } = parse(source).unwrap();
 
-    //   #[test]
-    //   fn more_minified_imports () {
-    //     let source = r#"import"some/import.js";`
-    //     let SourceAnalysis { imports, exports } = parse(source).unwrap();
-    //     assert_eq!(imports.len(), 1);
-    //     assert_eq!(imports[0].s, 7);
-    //     assert_eq!(imports[0].e, 21);
-    //     assert_eq!(imports[0].statement_start, 0);
-    //     assert_eq!(imports[0].statement_end, 22);
-    //   }
+        assert_eq!(imports.len(), 3);
 
-    //   #[test]
-    //   fn return_bracket_division () {
-    //     let source = r#"function variance(){return s/(a-1)}"#;
-    //     let SourceAnalysis { imports, exports } = parse(source).unwrap();
-    //   }
+        let import1 = match &imports[0] {
+            Import::Static(i) => i,
+            _ => panic!("Expected Import::Static"),
+        };
+        assert_eq!(&source[import1.module_specifier_range()], "lit-html");
+        assert_eq!(
+            &source[import1.statement_range()],
+            "import{TemplateResult as t}from\"lit-html\""
+        );
 
-    //   #[test]
-    //   fn simple_reexport () {
-    //     let source = r#"
-    //       export { hello as default } from "test-dep";
-    //     "#;
-    //     let SourceAnalysis { imports, exports } = parse(source).unwrap();
-    //     assert_eq!(imports.len(), 1);
-    //     const { s, e, ss, se, d } = imports[0];
-    //     assert_eq!(d, -1);
-    //     assert_eq!(source.slice(s, e), "test-dep");
-    //     assert_eq!(source.slice(ss, se), "export { hello as default } from "test-dep"");
+        let import2 = match &imports[1] {
+            Import::Static(i) => i,
+            _ => panic!("Expected Import::Static"),
+        };
+        assert_eq!(
+            &source[import2.module_specifier_range()],
+            "./chunk-4be41b30.js"
+        );
+        assert_eq!(
+            &source[import2.statement_range()],
+            "import{a as e}from\"./chunk-4be41b30.js\""
+        );
 
-    //     assert_eq!(exports.len(), 1);
-    //     assert_eq!(exports[0], "default");
-    //   }
+        let import3 = match &imports[2] {
+            Import::Static(i) => i,
+            _ => panic!("Expected Import::Static"),
+        };
+        assert_eq!(
+            &source[import3.module_specifier_range()],
+            "./chunk-4be41b30.js"
+        );
+        assert_eq!(
+            &source[import3.statement_range()],
+            "export{j as SVGTemplateResult,i as TemplateResult,g as html,h as svg}from\"./chunk-4be41b30.js\""
+        );
+    }
 
-    //   #[test]
-    //   fn import_meta () {
-    //     let source = r#"
-    //       export var hello = 'world';
-    //       console.log(import.meta.url);
-    //     "#;
-    //     let SourceAnalysis { imports, exports } = parse(source).unwrap();
-    //     assert_eq!(imports.len(), 1);
-    //     const { s, e, ss, se, d } = imports[0];
-    //     assert_eq!(d, -2);
-    //     assert_eq!(ss, 53);
-    //     assert_eq!(se, 64);
-    //     assert_eq!(source.slice(s, e), "import.meta");
-    //   }
+    #[test]
+    fn more_minified_imports() {
+        let source = r#"import"some/import.js";"#;
+        let SourceAnalysis { imports, .. } = parse(source).unwrap();
 
-    //   #[test]
-    //   fn import_meta_edge_cases () {
-    //     let source = r#"
-    //       // Import meta
-    //       import.
-    //        meta
-    //       // Not import meta
-    //       a.
-    //       import.
-    //         meta
-    //     "#;
-    //     let SourceAnalysis { imports, exports } = parse(source).unwrap();
-    //     assert_eq!(imports.len(), 1);
-    //     const { s, e, ss, se, d } = imports[0];
-    //     assert_eq!(d, -2);
-    //     assert_eq!(ss, 28);
-    //     assert_eq!(se, 47);
-    //     assert_eq!(source.slice(s, e), "import.\n       meta");
-    //   }
+        assert_eq!(imports.len(), 1);
 
-    //   #[test]
-    //   fn dynamic_import_method () {
-    //     await init;
-    //     let source = r#"
-    //       class A {
-    //         import() {
-    //         }
-    //       }
-    //     "#;
-    //     const [imports] = parse(source);
-    //     assert_eq!(imports.len(), 0);
-    //   }
+        let import = match &imports[0] {
+            Import::Static(i) => i,
+            _ => panic!("Expected Import::Static"),
+        };
+        assert_eq!(&source[import.module_specifier_range()], "some/import.js");
+        assert_eq!(
+            &source[import.statement_range()],
+            "import\"some/import.js\""
+        );
+    }
+
+    #[test]
+    fn return_bracket_division() {
+        let source = r#"function variance(){return s/(a-1)}"#;
+        let result = parse(source).map_err(|err| {
+            println!("{}", pretty_error(source, &err));
+            err
+        });
+        result.unwrap();
+    }
+
+    #[test]
+    fn simple_reexport() {
+        let source = r#"
+          export { hello as default } from "test-dep";
+        "#;
+        let SourceAnalysis { imports, exports } = parse(source).unwrap();
+
+        assert_eq!(imports.len(), 1);
+        let import = match &imports[0] {
+            Import::Static(i) => i,
+            _ => panic!("Expected Import::Static"),
+        };
+        assert_eq!(&source[import.module_specifier_range()], "test-dep");
+        assert_eq!(
+            &source[import.statement_range()],
+            "export { hello as default } from \"test-dep\""
+        );
+
+        assert_eq!(exports.len(), 1);
+        assert_eq!(&source[exports[0].export_specifier_range()], "default");
+    }
+
+    #[test]
+    fn import_meta() {
+        let source = r#"
+          export var hello = 'world';
+          console.log(import.meta.url);
+        "#;
+        let SourceAnalysis { imports, .. } = parse(source).unwrap();
+
+        assert_eq!(imports.len(), 1);
+        let import = match &imports[0] {
+            Import::Meta(i) => i,
+            _ => panic!("Expected Import::Meta"),
+        };
+        assert_eq!(&source[import.expression_range()], "import.meta");
+    }
+
+    #[test]
+    fn import_meta_edge_cases() {
+        let source = r#"
+          // Import meta
+          import.
+           meta
+          // Not import meta
+          a.
+          import.
+            meta
+        "#;
+        let SourceAnalysis { imports, .. } = parse(source).unwrap();
+        assert_eq!(imports.len(), 1);
+
+        let import = match &imports[0] {
+            Import::Meta(i) => i,
+            _ => panic!("Expected Import::Meta"),
+        };
+        assert_eq!(
+            &source[import.expression_range()],
+            "import.\n           meta"
+        );
+    }
+
+    #[test]
+    fn dynamic_import_method() {
+        let source = r#"
+          class A {
+            import() {
+            }
+          }
+        "#;
+        let SourceAnalysis { imports, .. } = parse(source).unwrap();
+        assert_eq!(imports.len(), 0);
+    }
 
     //   #[test]
     //   fn dynamic_import_edge_cases () {
