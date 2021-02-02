@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+pub use error::pretty_error;
 use error::ParseError;
 
 mod error;
@@ -745,7 +746,7 @@ fn is_br_or_ws(c: u8) -> bool {
 }
 
 fn is_br_or_ws_or_punctuator_not_dot(c: u8) -> bool {
-    return c > 8 && c < 14 || c == 32 || c == 160 || is_punctuator(c) && c as char != '.';
+    return c > 8 && c < 14 || c == 32 || c == 160 || is_punctuator(c) && c != b'.';
 }
 
 fn keyword_start(src: &[u8], i: usize) -> bool {
@@ -832,27 +833,27 @@ fn is_paren_keyword(src: &[u8], i: usize) -> bool {
 
 fn is_punctuator(ch: u8) -> bool {
     // 23 possible punctuator endings: !%&()*+,-./:;<=>?[]^{}|~
-    return ch as char == '!'
-        || ch as char == '%'
-        || ch as char == '&'
+    return ch == b'!'
+        || ch == b'%'
+        || ch == b'&'
         || ch > 39 && ch < 48
         || ch > 57 && ch < 64
-        || ch as char == '['
-        || ch as char == ']'
-        || ch as char == '^'
+        || ch == b'['
+        || ch == b']'
+        || ch == b'^'
         || ch > 122 && ch < 127;
 }
 
 fn is_expression_punctuator(ch: u8) -> bool {
     // 20 possible expression endings: !%&(*+,-.:;<=>?[^{|~
-    return ch as char == '!'
-        || ch as char == '%'
-        || ch as char == '&'
+    return ch == b'!'
+        || ch == b'%'
+        || ch == b'&'
         || ch > 39 && ch < 47 && ch != 41
         || ch > 57 && ch < 64
-        || ch as char == '['
-        || ch as char == '^'
-        || ch > 122 && ch < 127 && ch as char != '}';
+        || ch == b'['
+        || ch == b'^'
+        || ch > 122 && ch < 127 && ch != b'}';
 }
 
 // detects:
