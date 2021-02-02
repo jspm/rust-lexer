@@ -872,7 +872,6 @@ fn is_expression_terminator(src: &[u8], i: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::pretty_error;
 
     // #[test]
     // fn test_is_expression_keyword() {
@@ -1095,11 +1094,7 @@ export { d as a, p as b, z as c, r as d, q }"#;
     #[test]
     fn return_bracket_division() {
         let source = r#"function variance(){return s/(a-1)}"#;
-        let result = parse(source).map_err(|err| {
-            println!("{}", pretty_error(source, &err));
-            err
-        });
-        result.unwrap();
+        parse(source).unwrap();
     }
 
     #[test]
