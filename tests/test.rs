@@ -4,7 +4,7 @@ mod tests {
     use std::io::Read;
     use std::path::PathBuf;
 
-    use rust_lexer::{parse, pretty_error};
+    use es_module_lexer::{parse, pretty_error};
 
     #[test]
     fn test_parse_fixtures() {

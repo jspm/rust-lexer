@@ -29,7 +29,7 @@ Promise.resolve().then(async () => {
 	console.log('Module load time');
 	{
 		const start = process.hrtime.bigint();
-		var { parse } = await import('../wasm_node/rust_lexer.js');
+		var { parse } = await import('../wasm_node/es_module_lexer.js');
 		// await init();
 		console.log(`> ${Math.round(Number(process.hrtime.bigint() - start) / 1e6) + 'ms'}`);
 	}

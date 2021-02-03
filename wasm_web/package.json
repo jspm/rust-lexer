@@ -1,15 +1,16 @@
 {
-  "name": "rust-lexer",
+  "name": "es_module_lexer",
   "collaborators": [
-    "Guy Bedford <guybedford@gmail.com>"
+    "Guy Bedford <guybedford@gmail.com>",
+    "Vova Guguiev <vladimir.guguiev@gmail.com>"
   ],
   "version": "0.1.0",
   "files": [
-    "rust_lexer_bg.wasm",
-    "rust_lexer.js",
-    "rust_lexer.d.ts"
+    "es_module_lexer_bg.wasm",
+    "es_module_lexer.js",
+    "es_module_lexer.d.ts"
   ],
-  "module": "rust_lexer.js",
-  "types": "rust_lexer.d.ts",
+  "module": "es_module_lexer.js",
+  "types": "es_module_lexer.d.ts",
   "sideEffects": false
 }

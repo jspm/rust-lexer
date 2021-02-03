@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 
-use rust_lexer::parse;
+use es_module_lexer::parse;
 use std::time::Duration;
 
 fn parse_fixtures(c: &mut Criterion) {
