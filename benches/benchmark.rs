@@ -2,16 +2,10 @@ use std::fs::{read_dir, File};
 use std::io::Read;
 use std::path::PathBuf;
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use rust_lexer::parse;
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 
-fn fibonacci(n: u64) -> u64 {
-    match n {
-        0 => 1,
-        1 => 1,
-        n => fibonacci(n - 1) + fibonacci(n - 2),
-    }
-}
+use rust_lexer::parse;
+use std::time::Duration;
 
 fn parse_fixtures(c: &mut Criterion) {
     let fixtures: Vec<(PathBuf, u64, String)> = read_dir("fixtures")
@@ -30,6 +24,8 @@ fn parse_fixtures(c: &mut Criterion) {
         .collect();
 
     let mut group = c.benchmark_group("parse_fixtures");
+    group.measurement_time(Duration::from_secs(20));
+
     for (path, size, content) in fixtures {
         group.throughput(Throughput::Bytes(size));
         group.bench_with_input(
