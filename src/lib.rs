@@ -105,7 +105,7 @@ struct ParseState<'a> {
 #[cfg(feature = "wasm-bindgen")]
 #[wasm_bindgen(js_name = "parse")]
 pub fn parse_wasm(input: &str) -> Result<JsValue, JsValue> {
-    let output = parse(input).map_err(|err| pretty_error(input, &err));
+    let output = parse(input).map_err(|err| pretty_error(input, &err))?;
 
     JsValue::from_serde(&output)
         .map_err(|err| format!("failed to serialize parse output: {}", err.to_string()).into())

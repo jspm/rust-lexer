@@ -7,7 +7,7 @@ build-web:
 build-node:
 	wasm-pack build --release --out-dir wasm_node --target nodejs -- --features wasm
 
-wasm-size: build
+wasm-size: build-web
 	gzip -c wasm_web/rust_lexer_bg.wasm | wc -c
 
 wasm-bench: build-node
