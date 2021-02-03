@@ -1,9 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use rust_lexer::{parse, pretty_error, SourceAnalysis};
     use std::fs::{read_dir, File};
     use std::io::Read;
     use std::path::PathBuf;
+
+    use rust_lexer::{parse, pretty_error};
 
     #[test]
     fn test_parse_fixtures() {
@@ -18,21 +19,12 @@ mod tests {
 
                 (entry.path(), contents)
             })
-            .filter(|(path, _)| {
-                !path
-                    .file_name()
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                    .ends_with(".min.js")
-            })
             .collect();
 
         for (path, content) in entries {
             match parse(&content) {
                 Ok(_analysis) => {}
                 Err(err) => {
-                    println!(">>>>>>>>> {:?}", &path);
                     let msg = pretty_error(&content, &err);
                     eprintln!("{}", msg);
                     panic!("failed to parse {:?}", &path)
