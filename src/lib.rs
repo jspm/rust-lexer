@@ -758,8 +758,8 @@ fn read_preceding_keyword(src: &[u8], i: usize, keyword_prefix: &[u8]) -> bool {
     if i < length - 1 {
         return false;
     }
-    if &src[(i - length)..i] == keyword_prefix {
-        if i == length - 1 || is_br_or_ws_or_punctuator_not_dot(src[i - length - 1]) {
+    if &src[i - length..i] == keyword_prefix {
+        if i == length || is_br_or_ws_or_punctuator_not_dot(src[i - length - 1]) {
             return true;
         }
     }
@@ -770,21 +770,21 @@ fn is_expression_keyword(src: &[u8], i: usize) -> bool {
     match src[i] as char {
         'd' => match src[i - 1] as char {
             // void
-            'i' => read_preceding_keyword(src, i - 2, b"vo"),
+            'i' => read_preceding_keyword(src, i - 1, b"vo"),
             // yield
-            'l' => read_preceding_keyword(src, i - 2, b"yie"),
+            'l' => read_preceding_keyword(src, i - 1, b"yie"),
             _ => false,
         },
         'e' => match src[i - 1] as char {
             's' => match src[i - 2] as char {
                 // else
-                'l' => read_preceding_keyword(src, i - 3, b"e"),
+                'l' => read_preceding_keyword(src, i - 2, b"e"),
                 // case
-                'a' => read_preceding_keyword(src, i - 3, b"c"),
+                'a' => read_preceding_keyword(src, i - 2, b"c"),
                 _ => false,
             },
             // delete
-            't' => read_preceding_keyword(src, i - 2, b"dele"),
+            't' => read_preceding_keyword(src, i - 1, b"dele"),
             _ => false,
         },
         'f' => {
@@ -793,29 +793,29 @@ fn is_expression_keyword(src: &[u8], i: usize) -> bool {
             } else {
                 match src[i - 3] as char {
                     // instanceof
-                    'c' => read_preceding_keyword(src, i - 4, b"instan"),
+                    'c' => read_preceding_keyword(src, i - 3, b"instan"),
                     // typeof
-                    'p' => read_preceding_keyword(src, i - 4, b"ty"),
+                    'p' => read_preceding_keyword(src, i - 3, b"ty"),
                     _ => false,
                 }
             }
         }
         // in, return
         'n' => {
-            read_preceding_keyword(src, i - 1, b"i") || read_preceding_keyword(src, i - 1, b"retur")
+            read_preceding_keyword(src, i, b"i") || read_preceding_keyword(src, i, b"retur")
         }
 
         // do
-        'o' => read_preceding_keyword(src, i - 1, b"d"),
+        'o' => read_preceding_keyword(src, i, b"d"),
         // debugger
-        'r' => read_preceding_keyword(src, i - 1, b"debugge"),
+        'r' => read_preceding_keyword(src, i, b"debugge"),
         // await
-        't' => read_preceding_keyword(src, i - 1, b"awai"),
+        't' => read_preceding_keyword(src, i, b"awai"),
         'w' => match src[i - 1] as char {
             // new
-            'e' => read_preceding_keyword(src, i - 2, b"n"),
+            'e' => read_preceding_keyword(src, i - 1, b"n"),
             // throw
-            'o' => read_preceding_keyword(src, i - 2, b"thr"),
+            'o' => read_preceding_keyword(src, i - 1, b"thr"),
             _ => false,
         },
         _ => false,
@@ -874,24 +874,24 @@ fn is_expression_terminator(src: &[u8], i: usize) -> bool {
 mod tests {
     use super::*;
 
-    // #[test]
-    // fn test_is_expression_keyword() {
-    //     // debugger, delete, do, else, in, instanceof, new,
-    //     // return, throw, typeof, void, yield ,await
-    //     assert!(is_expression_keyword(b"debugger", 7));
-    //     assert!(is_expression_keyword(b"delete", 5));
-    //     assert!(is_expression_keyword(b"do", 1));
-    //     assert!(is_expression_keyword(b"else", 3));
-    //     assert!(is_expression_keyword(b"in", 1));
-    //     assert!(is_expression_keyword(b"instanceof", 9));
-    //     assert!(is_expression_keyword(b"new", 2));
-    //     assert!(is_expression_keyword(b"return", 5));
-    //     assert!(is_expression_keyword(b"throw", 4));
-    //     assert!(is_expression_keyword(b"typeof", 5));
-    //     assert!(is_expression_keyword(b"void", 3));
-    //     assert!(is_expression_keyword(b"yield", 4));
-    //     assert!(is_expression_keyword(b"await", 4));
-    // }
+    #[test]
+    fn test_is_expression_keyword() {
+        // debugger, delete, do, else, in, instanceof, new,
+        // return, throw, typeof, void, yield ,await
+        assert!(is_expression_keyword(b"debugger", 7));
+        assert!(is_expression_keyword(b"delete", 5));
+        assert!(is_expression_keyword(b"do", 1));
+        assert!(is_expression_keyword(b"else", 3));
+        assert!(is_expression_keyword(b"in", 1));
+        assert!(is_expression_keyword(b"instanceof", 9));
+        assert!(is_expression_keyword(b"new", 2));
+        assert!(is_expression_keyword(b"return", 5));
+        assert!(is_expression_keyword(b"throw", 4));
+        assert!(is_expression_keyword(b"typeof", 5));
+        assert!(is_expression_keyword(b"void", 3));
+        assert!(is_expression_keyword(b"yield", 4));
+        assert!(is_expression_keyword(b"await", 4));
+    }
 
     #[test]
     fn invalid_string() {
