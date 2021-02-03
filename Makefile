@@ -1,5 +1,11 @@
 .DEFAULT_GOAL := build-web
 
+test:
+	cargo test
+
+bench:
+	cargo bench
+
 build-web:
 	wasm-pack build --release --out-dir wasm_web --target web -- --features wasm
 	rm -f wasm_web/README.md wasm_web/.gitignore
@@ -13,4 +19,4 @@ wasm-size: build-web
 wasm-bench: build-node
 	node --expose-gc wasm_benches/benchmark.mjs
 
-.PHONY: build-web build-node wasm-size wasm-bench
+.PHONY: test bench build-web build-node wasm-size wasm-bench
