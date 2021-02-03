@@ -1,0 +1,15 @@
+{
+  "name": "rust-lexer",
+  "collaborators": [
+    "Guy Bedford <guybedford@gmail.com>"
+  ],
+  "version": "0.1.0",
+  "files": [
+    "rust_lexer_bg.wasm",
+    "rust_lexer.js",
+    "rust_lexer.d.ts"
+  ],
+  "module": "rust_lexer.js",
+  "types": "rust_lexer.d.ts",
+  "sideEffects": false
+}

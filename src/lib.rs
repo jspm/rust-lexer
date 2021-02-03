@@ -1,4 +1,10 @@
+#[cfg(feature = "serde")]
+#[macro_use]
+extern crate serde;
+
 use std::ops::Range;
+
+use wasm_bindgen::prelude::*;
 
 pub use error::pretty_error;
 use error::ParseError;
@@ -6,6 +12,7 @@ use error::ParseError;
 mod error;
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub enum Import {
     Dynamic(DynamicImport),
     Static(StaticImport),
@@ -13,6 +20,7 @@ pub enum Import {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct DynamicImport {
     pub statement_start: usize,
     pub start: usize,
@@ -29,6 +37,7 @@ impl DynamicImport {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct StaticImport {
     pub statement_start: usize,
     pub start: usize,
@@ -46,6 +55,7 @@ impl StaticImport {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct MetaImport {
     pub start: usize,
     pub end: usize,
@@ -58,6 +68,7 @@ impl MetaImport {
 }
 
 #[derive(Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct Export {
     pub start: usize,
     pub end: usize,
@@ -70,7 +81,14 @@ impl Export {
 }
 
 #[derive(Debug)]
-pub struct ParseState<'a> {
+#[cfg_attr(feature = "serde", derive(Serialize))]
+pub struct SourceAnalysis {
+    pub imports: Vec<Import>,
+    pub exports: Vec<Export>,
+}
+
+#[derive(Debug)]
+struct ParseState<'a> {
     src: &'a [u8],
     i: usize,
     template_stack: Vec<usize>,
@@ -84,10 +102,13 @@ pub struct ParseState<'a> {
     analysis: SourceAnalysis,
 }
 
-#[derive(Debug)]
-pub struct SourceAnalysis {
-    pub imports: Vec<Import>,
-    pub exports: Vec<Export>,
+#[cfg(feature = "wasm-bindgen")]
+#[wasm_bindgen(js_name = "parse")]
+pub fn parse_wasm(input: &str) -> Result<JsValue, JsValue> {
+    let output = parse(input).map_err(|err| pretty_error(input, &err));
+
+    JsValue::from_serde(&output)
+        .map_err(|err| format!("failed to serialize parse output: {}", err.to_string()).into())
 }
 
 pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
@@ -801,9 +822,7 @@ fn is_expression_keyword(src: &[u8], i: usize) -> bool {
             }
         }
         // in, return
-        'n' => {
-            read_preceding_keyword(src, i, b"i") || read_preceding_keyword(src, i, b"retur")
-        }
+        'n' => read_preceding_keyword(src, i, b"i") || read_preceding_keyword(src, i, b"retur"),
 
         // do
         'o' => read_preceding_keyword(src, i, b"d"),
