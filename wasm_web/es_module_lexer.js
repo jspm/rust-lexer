@@ -102,13 +102,204 @@ function passStringToWasm0(arg, malloc, realloc) {
 }
 /**
 * @param {string} input
-* @returns {any}
+* @returns {SourceAnalysis}
 */
 export function parse(input) {
     var ptr0 = passStringToWasm0(input, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     var len0 = WASM_VECTOR_LEN;
     var ret = wasm.parse(ptr0, len0);
-    return takeObject(ret);
+    return SourceAnalysis.__wrap(ret);
+}
+
+/**
+*/
+export class DynamicImport {
+
+    static __wrap(ptr) {
+        const obj = Object.create(DynamicImport.prototype);
+        obj.ptr = ptr;
+
+        return obj;
+    }
+
+    free() {
+        const ptr = this.ptr;
+        this.ptr = 0;
+
+        wasm.__wbg_dynamicimport_free(ptr);
+    }
+    /**
+    * @returns {Range}
+    */
+    moduleSpecifierExpressionRange() {
+        var ret = wasm.dynamicimport_moduleSpecifierExpressionRange(this.ptr);
+        return Range.__wrap(ret);
+    }
+    /**
+    * @returns {Range}
+    */
+    importExpressionRange() {
+        var ret = wasm.dynamicimport_importExpressionRange(this.ptr);
+        return Range.__wrap(ret);
+    }
+}
+/**
+*/
+export class Export {
+
+    static __wrap(ptr) {
+        const obj = Object.create(Export.prototype);
+        obj.ptr = ptr;
+
+        return obj;
+    }
+
+    free() {
+        const ptr = this.ptr;
+        this.ptr = 0;
+
+        wasm.__wbg_export_free(ptr);
+    }
+    /**
+    * @returns {Range}
+    */
+    exportSpecifierRange() {
+        var ret = wasm.export_exportSpecifierRange(this.ptr);
+        return Range.__wrap(ret);
+    }
+}
+/**
+*/
+export class ImportMeta {
+
+    static __wrap(ptr) {
+        const obj = Object.create(ImportMeta.prototype);
+        obj.ptr = ptr;
+
+        return obj;
+    }
+
+    free() {
+        const ptr = this.ptr;
+        this.ptr = 0;
+
+        wasm.__wbg_importmeta_free(ptr);
+    }
+    /**
+    * @returns {Range}
+    */
+    expressionRange() {
+        var ret = wasm.export_exportSpecifierRange(this.ptr);
+        return Range.__wrap(ret);
+    }
+}
+/**
+*/
+export class Range {
+
+    static __wrap(ptr) {
+        const obj = Object.create(Range.prototype);
+        obj.ptr = ptr;
+
+        return obj;
+    }
+
+    free() {
+        const ptr = this.ptr;
+        this.ptr = 0;
+
+        wasm.__wbg_range_free(ptr);
+    }
+    /**
+    * @returns {number}
+    */
+    get start() {
+        var ret = wasm.__wbg_get_range_start(this.ptr);
+        return ret >>> 0;
+    }
+    /**
+    * @param {number} arg0
+    */
+    set start(arg0) {
+        wasm.__wbg_set_range_start(this.ptr, arg0);
+    }
+    /**
+    * @returns {number}
+    */
+    get end() {
+        var ret = wasm.__wbg_get_range_end(this.ptr);
+        return ret >>> 0;
+    }
+    /**
+    * @param {number} arg0
+    */
+    set end(arg0) {
+        wasm.__wbg_set_range_end(this.ptr, arg0);
+    }
+}
+/**
+*/
+export class SourceAnalysis {
+
+    static __wrap(ptr) {
+        const obj = Object.create(SourceAnalysis.prototype);
+        obj.ptr = ptr;
+
+        return obj;
+    }
+
+    free() {
+        const ptr = this.ptr;
+        this.ptr = 0;
+
+        wasm.__wbg_sourceanalysis_free(ptr);
+    }
+    /**
+    * @returns {Array<any>}
+    */
+    get imports() {
+        var ret = wasm.sourceanalysis_imports(this.ptr);
+        return takeObject(ret);
+    }
+    /**
+    * @returns {Array<any>}
+    */
+    get exports() {
+        var ret = wasm.sourceanalysis_exports(this.ptr);
+        return takeObject(ret);
+    }
+}
+/**
+*/
+export class StaticImport {
+
+    static __wrap(ptr) {
+        const obj = Object.create(StaticImport.prototype);
+        obj.ptr = ptr;
+
+        return obj;
+    }
+
+    free() {
+        const ptr = this.ptr;
+        this.ptr = 0;
+
+        wasm.__wbg_staticimport_free(ptr);
+    }
+    /**
+    * @returns {Range}
+    */
+    moduleSpecifierRange() {
+        var ret = wasm.dynamicimport_moduleSpecifierExpressionRange(this.ptr);
+        return Range.__wrap(ret);
+    }
+    /**
+    * @returns {Range}
+    */
+    statementRange() {
+        var ret = wasm.staticimport_statementRange(this.ptr);
+        return Range.__wrap(ret);
+    }
 }
 
 async function load(module, imports) {
@@ -154,9 +345,35 @@ async function init(input) {
         var ret = getStringFromWasm0(arg0, arg1);
         return addHeapObject(ret);
     };
-    imports.wbg.__wbindgen_json_parse = function(arg0, arg1) {
-        var ret = JSON.parse(getStringFromWasm0(arg0, arg1));
+    imports.wbg.__wbindgen_object_drop_ref = function(arg0) {
+        takeObject(arg0);
+    };
+    imports.wbg.__wbg_export_new = function(arg0) {
+        var ret = Export.__wrap(arg0);
         return addHeapObject(ret);
+    };
+    imports.wbg.__wbg_staticimport_new = function(arg0) {
+        var ret = StaticImport.__wrap(arg0);
+        return addHeapObject(ret);
+    };
+    imports.wbg.__wbg_dynamicimport_new = function(arg0) {
+        var ret = DynamicImport.__wrap(arg0);
+        return addHeapObject(ret);
+    };
+    imports.wbg.__wbg_importmeta_new = function(arg0) {
+        var ret = ImportMeta.__wrap(arg0);
+        return addHeapObject(ret);
+    };
+    imports.wbg.__wbg_new_1abc33d4f9ba3e80 = function() {
+        var ret = new Array();
+        return addHeapObject(ret);
+    };
+    imports.wbg.__wbg_push_44968dcdf4cfbb43 = function(arg0, arg1) {
+        var ret = getObject(arg0).push(getObject(arg1));
+        return ret;
+    };
+    imports.wbg.__wbindgen_throw = function(arg0, arg1) {
+        throw new Error(getStringFromWasm0(arg0, arg1));
     };
     imports.wbg.__wbindgen_rethrow = function(arg0) {
         throw takeObject(arg0);

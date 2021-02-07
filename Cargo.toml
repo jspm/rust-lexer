@@ -11,11 +11,12 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = ["serde"]
-wasm = ["wasm-bindgen", "serde"]
+wasm = ["wasm-bindgen", "js-sys"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"], optional = true }
 wasm-bindgen = { version = "0.2.69", features = ["serde-serialize"], optional = true }
+js-sys = { version = "0.3.47", optional = true }
 
 [dev-dependencies]
 criterion = "0.3"

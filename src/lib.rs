@@ -12,15 +12,37 @@ use error::ParseError;
 
 mod error;
 
-#[derive(Debug)]
+#[cfg(feature = "wasm")]
+mod wasm_types;
+
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 pub enum Import {
-    Dynamic(DynamicImport),
     Static(StaticImport),
-    Meta(MetaImport),
+    Dynamic(DynamicImport),
+    Meta(ImportMeta),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+pub struct StaticImport {
+    pub statement_start: usize,
+    pub start: usize,
+    pub end: usize,
+    pub statement_end: usize,
+}
+
+impl StaticImport {
+    pub fn module_specifier_range(&self) -> Range<usize> {
+        self.start..self.end
+    }
+
+    pub fn statement_range(&self) -> Range<usize> {
+        self.statement_start..self.statement_end
+    }
+}
+
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct DynamicImport {
     pub statement_start: usize,
@@ -37,38 +59,20 @@ impl DynamicImport {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
-pub struct StaticImport {
-    pub statement_start: usize,
-    pub start: usize,
-    pub end: usize,
-    pub statement_end: usize,
-}
-
-impl StaticImport {
-    pub fn module_specifier_range(&self) -> Range<usize> {
-        self.start..self.end
-    }
-    pub fn statement_range(&self) -> Range<usize> {
-        self.statement_start..self.statement_end
-    }
-}
-
-#[derive(Debug)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
-pub struct MetaImport {
+pub struct ImportMeta {
     pub start: usize,
     pub end: usize,
 }
 
-impl MetaImport {
+impl ImportMeta {
     pub fn expression_range(&self) -> Range<usize> {
         self.start..self.end
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct Export {
     pub start: usize,
@@ -105,11 +109,16 @@ struct ParseState<'a> {
 
 #[cfg(feature = "wasm")]
 #[wasm_bindgen(js_name = "parse")]
-pub fn parse_wasm(input: &str) -> Result<JsValue, JsValue> {
-    let output = parse(input).map_err(|err| pretty_error(input, &err))?;
+pub fn parse_wasm(input: &str) -> Result<wasm_types::SourceAnalysis, JsValue> {
+    let output = parse(input).map_err(|err| JsValue::from(pretty_error(input, &err)))?;
 
-    JsValue::from_serde(&output)
-        .map_err(|err| format!("failed to serialize parse output: {}", err.to_string()).into())
+    Ok(wasm_types::SourceAnalysis::from_imports_and_exports(
+        output.imports,
+        output.exports,
+    ))
+
+    // JsValue::from_serde(&output)
+    //     .map_err(|err| format!("failed to serialize parse output: {}", err.to_string()).into())
 }
 
 pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
@@ -352,7 +361,7 @@ fn try_parse_import_statement(state: &mut ParseState) -> Result<(), ParseError> 
                 && (state.last_token_index == usize::MAX
                     || state.src[state.last_token_index] != b'.')
             {
-                state.analysis.imports.push(Import::Meta(MetaImport {
+                state.analysis.imports.push(Import::Meta(ImportMeta {
                     start: start_index,
                     end: state.i + 4,
                 }));
