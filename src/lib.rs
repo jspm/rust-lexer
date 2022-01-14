@@ -108,6 +108,7 @@ pub struct CjsSourceAnalysis {
     pub _exports: HashSet<String>,
     pub unsafe_getters: HashSet<String>,
     pub reexports: HashSet<String>,
+    pub last_star_export_specifier: Option<String>,
 }
 
 #[derive(Debug)]
@@ -160,6 +161,7 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
             _exports: HashSet::default(),
             unsafe_getters: HashSet::default(),
             reexports: HashSet::default(),
+            last_star_export_specifier: None,
         },
     };
 
@@ -366,6 +368,7 @@ fn parse_cjs(input: &str) -> Result<(), ParseError> {
             _exports: HashSet::default(),
             unsafe_getters: HashSet::default(),
             reexports: HashSet::default(),
+            last_star_export_specifier: None,
         },
     };
 
@@ -680,7 +683,41 @@ fn try_parse_require(
         let ch = comment_whitespace(state)? as char;
         if ch == '(' {
             state.i += 1;
-            todo!()
+            let ch = comment_whitespace(state)?;
+            let reexport_start = state.i;
+            if ch == '\'' || ch == '"' {
+                if ch == '\'' {
+                    single_quote_string(state)?;
+                } else {
+                    double_quote_string(state)?;
+                }
+                state.i += 1;
+                let reexport_end = state.i;
+                let ch = comment_whitespace(state)?;
+                if ch == ')' {
+                    match require_type {
+                        RequireType::ExportAssign => {
+                            state
+                                .cjs_analysis
+                                .reexports
+                                .insert(decode(&state.src[reexport_start..reexport_end]));
+                            return Ok(true);
+                        }
+                        RequireType::ExportStar => {
+                            state
+                                .cjs_analysis
+                                .reexports
+                                .insert(decode(&state.src[reexport_start..reexport_end]));
+                            return Ok(true);
+                        }
+                        RequireType::Import => {
+                            state.cjs_analysis.last_star_export_specifier =
+                                Some(decode(&state.src[reexport_start..reexport_end]));
+                            return Ok(true);
+                        }
+                    }
+                }
+            }
         }
 
         state.i = revert_pos;
@@ -776,7 +813,8 @@ fn try_parse_exports_dot_assign(state: &mut ParseState, assign: bool) -> Result<
             if ch == '\'' {
                 let start_pos = state.i;
                 single_quote_string(state)?;
-                let end_pos = state.i + 1;
+                state.i += 1;
+                let end_pos = state.i;
                 let ch = comment_whitespace(state)?;
                 if ch == ']' {
                     state.i += 1;
@@ -791,7 +829,8 @@ fn try_parse_exports_dot_assign(state: &mut ParseState, assign: bool) -> Result<
             } else if ch == '"' {
                 let start_pos = state.i;
                 double_quote_string(state)?;
-                let end_pos = state.i + 1;
+                state.i += 1;
+                let end_pos = state.i;
                 let ch = comment_whitespace(state)?;
                 if ch == ']' {
                     state.i += 1;
