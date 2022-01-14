@@ -2,6 +2,8 @@
 #[macro_use]
 extern crate serde;
 
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::ops::Range;
 
 #[cfg(feature = "wasm")]
@@ -21,6 +23,14 @@ pub enum Import {
     Static(StaticImport),
     Dynamic(DynamicImport),
     Meta(ImportMeta),
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+pub enum RequireType {
+    Import,
+    ExportAssign,
+    ExportStar,
 }
 
 #[derive(Debug, Clone)]
@@ -93,6 +103,14 @@ pub struct SourceAnalysis {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+pub struct CjsSourceAnalysis {
+    pub _exports: HashSet<String>,
+    pub unsafe_getters: HashSet<String>,
+    pub reexports: HashSet<String>,
+}
+
+#[derive(Debug)]
 struct ParseState<'a> {
     src: &'a [u8],
     i: usize,
@@ -105,6 +123,7 @@ struct ParseState<'a> {
     open_class_index_stack: Vec<bool>,
     last_dynamic_import: Option<usize>,
     analysis: SourceAnalysis,
+    cjs_analysis: CjsSourceAnalysis,
 }
 
 #[cfg(feature = "wasm")]
@@ -136,6 +155,11 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
         analysis: SourceAnalysis {
             imports: Vec::with_capacity(20),
             exports: Vec::with_capacity(20),
+        },
+        cjs_analysis: CjsSourceAnalysis {
+            _exports: HashSet::default(),
+            unsafe_getters: HashSet::default(),
+            reexports: HashSet::default(),
         },
     };
 
@@ -320,6 +344,256 @@ pub fn parse(input: &str) -> Result<SourceAnalysis, ParseError> {
     }
 
     Ok(state.analysis)
+}
+
+fn parse_cjs(input: &str) -> Result<(), ParseError> {
+    let mut state = ParseState {
+        src: input.as_bytes(),
+        i: 0,
+        template_stack: Vec::<usize>::with_capacity(10),
+        open_token_index_stack: Vec::<usize>::with_capacity(50),
+        template_depth: None,
+        open_token_depth: 0,
+        last_token_index: usize::MAX,
+        open_class_index_stack: Vec::<bool>::with_capacity(10),
+        next_brace_is_class: false,
+        last_dynamic_import: None,
+        analysis: SourceAnalysis {
+            imports: Vec::with_capacity(20),
+            exports: Vec::with_capacity(20),
+        },
+        cjs_analysis: CjsSourceAnalysis {
+            _exports: HashSet::default(),
+            unsafe_getters: HashSet::default(),
+            reexports: HashSet::default(),
+        },
+    };
+
+    let len = state.src.len();
+
+    // Handle #!
+    if state.src.get(0) == Some(&35) /*#*/ && state.src.get(1) == Some(&33)
+    /*\!*/
+    {
+        if len == 2 {
+            return Ok(());
+        }
+        state.i += 2;
+
+        while state.i < len - 1 {
+            state.i += 1;
+            let ch = state.src[state.i] as char;
+            if ch == '\n' || ch == '\r' {
+                break;
+            }
+        }
+    }
+
+    while state.i < len - 1 {
+        let ch = state.src[state.i];
+
+        if ch == b' ' || (ch < 14 && ch > 8) {
+            continue;
+        }
+
+        if state.open_token_depth == 0 {
+            match ch as char {
+                'i' => {
+                    if keyword_start(state.src, state.i)
+                        && &state.src[state.i + 1..state.i + 5] == b"mport"
+                    {
+                        error_if_import_statement(&mut state)?;
+                    }
+                    state.last_token_index = state.i;
+                    continue;
+                }
+                'r' => {
+                    let start_pos = state.i;
+                    if keyword_start(state.src, state.i)
+                        && try_parse_require(&mut state, RequireType::Import)?
+                    {
+                        try_backtrack_add_star_export_binding(&mut state, start_pos - 1);
+                    }
+                    state.last_token_index = state.i;
+                    continue;
+                }
+                '_' => {
+                    if (keyword_start(state.src, state.i) || state.src[state.i - 1] == b'.')
+                        && &state.src[state.i + 1..state.i + 23] == b"interopRequireWildcard"
+                    {
+                        let start_pos = state.i;
+                        state.i += 23;
+                        if state.src[state.i] == b'(' {
+                            state.i += 1;
+                            state
+                                .open_token_index_stack
+                                .resize(state.open_token_depth + 1, 0);
+                            state.open_token_index_stack[state.open_token_depth] =
+                                state.last_token_index;
+                            state.open_token_depth += 1;
+
+                            if keyword_start(state.src, start_pos)
+                                && try_parse_require(&mut state, RequireType::Import)?
+                            {
+                                try_backtrack_add_star_export_binding(&mut state, start_pos - 1);
+                            }
+                        }
+                    } else if (keyword_start(state.src, state.i) || state.src[state.i - 1] == b'.')
+                        && &state.src[state.i + 1..state.i + 8] == b"_export"
+                    {
+                        state.i += 8;
+                        if &state.src[state.i + 1..state.i + 4] == b"Star" {
+                            state.i += 4;
+                        }
+                        if state.src[state.i] == b'(' {
+                            state
+                                .open_token_index_stack
+                                .resize(state.open_token_depth + 1, 0);
+                            state.open_token_index_stack[state.open_token_depth] =
+                                state.last_token_index;
+                            state.open_token_depth += 1;
+                            state.i += 1;
+                            if state.src[state.i] == b'r' {
+                                try_parse_require(&mut state, RequireType::ExportStar)?;
+                            }
+                        }
+                    }
+                    state.last_token_index = state.i;
+                    continue;
+                }
+                _ => {}
+            }
+        }
+
+        match ch as char {
+            'e' => {}
+            'c' => {}
+            'm' => {}
+            'O' => {}
+            '(' => {}
+            ')' => {}
+            '{' => {}
+            '}' => {}
+            '>' => {}
+            '\'' | '"' => {}
+            '/' => {}
+            '`' => {}
+            _ => {}
+        };
+
+        state.last_token_index = state.i;
+    }
+
+    // TODO:
+    // if (templateDepth !== -1)
+    // throw new Error('Unterminated template.');
+    // if (openTokenDepth)
+    //     throw new Error('Unterminated braces.');
+
+    return Ok(());
+}
+
+fn try_backtrack_add_star_export_binding(state: &mut ParseState, mut b_pos: usize) {
+    while state.src[b_pos] == b' ' && b_pos >= 0 {
+        b_pos -= 1;
+    }
+    if state.src[b_pos] == b'=' {
+        b_pos -= 1;
+        while state.src[b_pos] == b' ' && b_pos >= 0 {
+            b_pos -= 1;
+        }
+        let id_end = b_pos;
+        let mut identifier_start = false;
+
+        todo!()
+    }
+}
+
+fn code_point_len() -> usize {
+    todo!()
+}
+
+fn code_point_at_last(state: &ParseState, b_pos: usize) {
+    todo!()
+}
+
+/// Test whether a given character code starts an indentifier.
+fn is_identifier_start() -> bool {
+    todo!()
+}
+
+/// Test whether a given character is part of an indentifier
+fn is_identifier_char() -> bool {
+    todo!()
+}
+
+fn is_in_astral_set() -> bool {
+    todo!()
+}
+
+fn try_parse_require(
+    state: &mut ParseState,
+    require_type: RequireType,
+) -> Result<bool, ParseError> {
+    // require('...')
+    let revert_pos = state.i;
+    if &state.src[state.i + 1..state.i + 6] == b"equire" {
+        state.i += 7;
+        let ch = comment_whitespace(state)? as char;
+        if ch == '(' {
+            state.i += 1;
+            todo!()
+        }
+
+        state.i = revert_pos;
+    }
+
+    Ok(false)
+}
+
+fn error_if_import_statement(state: &mut ParseState) -> Result<(), ParseError> {
+    let start_index = state.i;
+
+    state.i += 6;
+
+    let ch = comment_whitespace(state)?;
+
+    match ch as char {
+        // dynamic import
+        '(' => {
+            state
+                .open_token_index_stack
+                .resize(state.open_token_depth + 1, 0);
+            state.open_token_index_stack[state.open_token_depth] = start_index;
+            state.open_token_depth += 1;
+            return Ok(());
+        }
+        // import.meta
+        '.' => {
+            return Err(ParseError::from_source_and_index(state.src, state.i));
+        }
+        _ => {
+            // no space after "import" -> not an import keyword
+            if ch != '"' && ch != '\'' && ch != '{' && ch != '*' && state.i == start_index + 6 {
+                return Ok(());
+            }
+
+            // import statement only permitted at base-level
+            if state.open_token_depth != 0 {
+                state.i -= 1;
+                return Ok(());
+            }
+            while state.i < state.src.len() {
+                let ch = state.src[state.i] as char;
+                if ch == '\'' || ch == '"' {
+                    read_import_string(start_index, ch, state)?;
+                    return Ok(());
+                }
+                state.i += 1;
+            }
+            return Err(ParseError::from_source_and_index(state.src, state.i));
+        }
+    }
 }
 
 fn try_parse_import_statement(state: &mut ParseState) -> Result<(), ParseError> {
