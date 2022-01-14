@@ -536,7 +536,6 @@ fn parse_cjs(input: &str) -> Result<(), ParseError> {
             }
             '>' => {
                 // TODO: <!--- XML comment support
-                break;
             }
             '\'' => {
                 single_quote_string(&mut state)?;
@@ -660,7 +659,7 @@ fn try_parse_require(
 ) -> Result<bool, ParseError> {
     // require('...')
     let revert_pos = state.i;
-    if &state.src[state.i + 1..state.i + 6] == b"equire" {
+    if &state.src[state.i + 1..state.i + 7] == b"equire" {
         state.i += 7;
         let ch = comment_whitespace(state)? as char;
         if ch == '(' {
