@@ -498,10 +498,18 @@ fn parse_cjs(input: &str) -> Result<(), ParseError> {
                 }
             }
             'm' => {
-                todo!()
+                if keyword_start(state.src, state.i)
+                    && &state.src[state.i + 1..state.i + 6] == b"odule"
+                {
+                    try_parse_module_exports_dot_assign(&mut state)?;
+                }
             }
             'O' => {
-                todo!()
+                if keyword_start(state.src, state.i)
+                    && &state.src[state.i + 1..state.i + 6] == b"bject"
+                {
+                    try_parse_object_define_or_keys(&mut state, state.open_token_depth == 0)?;
+                }
             }
             '(' => {
                 state
@@ -782,6 +790,28 @@ fn error_if_export_statement(state: &mut ParseState) -> Result<(), ParseError> {
     }
 
     return Err(ParseError::from_source_and_index(state.src, state.i));
+}
+
+fn try_parse_object_define_or_keys(state: &mut ParseState, keys: bool) -> Result<bool, ParseError> {
+    state.i += 6;
+    let revert_pos = state.i - 1;
+    let ch = comment_whitespace(state)?;
+    todo!();
+}
+
+fn try_parse_module_exports_dot_assign(state: &mut ParseState) -> Result<(), ParseError> {
+    state.i += 6;
+    let revert_pos = state.i - 1;
+    let ch = comment_whitespace(state)?;
+    if ch == '.' {
+        state.i += 1;
+        let ch = comment_whitespace(state)?;
+        if ch == 'e' && &&&state.src[state.i + 1..state.i + 7] == b"xports" {
+            return try_parse_exports_dot_assign(state, true);
+        }
+    }
+    state.i = revert_pos;
+    Ok(())
 }
 
 fn try_parse_exports_dot_assign(state: &mut ParseState, assign: bool) -> Result<(), ParseError> {
