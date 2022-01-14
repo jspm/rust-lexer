@@ -476,7 +476,15 @@ fn parse_cjs(input: &str) -> Result<(), ParseError> {
 
         match ch as char {
             'e' => {
-                todo!()
+                if keyword_start(state.src, state.i)
+                    && &state.src[state.i + 1..state.i + 6] == b"xport"
+                {
+                    if state.src[state.i + 6] == b's' {
+                        try_parse_exports_dot_assign(&mut state, false)?;
+                    } else if state.open_token_depth == 0 {
+                        error_if_export_statement(&mut state)?;
+                    }
+                }
             }
             'c' => {
                 if keyword_start(state.src, state.i)
@@ -639,6 +647,14 @@ fn code_point_at_last(state: &ParseState, b_pos: usize) {
     todo!()
 }
 
+fn decode(source: &[u8]) -> String {
+    todo!()
+}
+
+fn identifier(state: &mut ParseState) -> bool {
+    todo!()
+}
+
 /// Test whether a given character code starts an indentifier.
 fn is_identifier_start() -> bool {
     todo!()
@@ -716,6 +732,104 @@ fn error_if_import_statement(state: &mut ParseState) -> Result<(), ParseError> {
             return Err(ParseError::from_source_and_index(state.src, state.i));
         }
     }
+}
+
+fn error_if_export_statement(state: &mut ParseState) -> Result<(), ParseError> {
+    state.i += 6;
+    let start_index = state.i;
+
+    let ch = comment_whitespace(state)?;
+
+    if start_index == state.i && !is_punctuator(ch as u8) {
+        return Ok(());
+    }
+
+    return Err(ParseError::from_source_and_index(state.src, state.i));
+}
+
+fn try_parse_exports_dot_assign(state: &mut ParseState, assign: bool) -> Result<(), ParseError> {
+    state.i += 7;
+    let revert_pos = state.i - 1;
+    let ch = comment_whitespace(state)?;
+    match ch {
+        // exports.asdf
+        '.' => {
+            state.i += 1;
+            let ch = comment_whitespace(state)?;
+            let start_pos = state.i;
+            if identifier(state) {
+                let end_pos = state.i;
+                let ch = comment_whitespace(state)?;
+                if ch == '=' {
+                    state
+                        .cjs_analysis
+                        ._exports
+                        .insert(decode(&state.src[start_pos..end_pos]));
+                    return Ok(());
+                }
+            }
+        }
+        // exports['asdf']
+        '[' => {
+            state.i += 1;
+            let ch = comment_whitespace(state)?;
+            if ch == '\'' {
+                let start_pos = state.i;
+                single_quote_string(state)?;
+                let end_pos = state.i + 1;
+                let ch = comment_whitespace(state)?;
+                if ch == ']' {
+                    state.i += 1;
+                    let ch = comment_whitespace(state)?;
+                    if ch == '=' {
+                        state
+                            .cjs_analysis
+                            ._exports
+                            .insert(decode(&state.src[start_pos..end_pos]));
+                    }
+                }
+            } else if ch == '"' {
+                let start_pos = state.i;
+                double_quote_string(state)?;
+                let end_pos = state.i + 1;
+                let ch = comment_whitespace(state)?;
+                if ch == ']' {
+                    state.i += 1;
+                    let ch = comment_whitespace(state)?;
+                    if ch == '=' {
+                        state
+                            .cjs_analysis
+                            ._exports
+                            .insert(decode(&state.src[start_pos..end_pos]));
+                    }
+                }
+            }
+        }
+        // module.exports =
+        '=' => {
+            if assign {
+                state.i += 1;
+                let ch = comment_whitespace(state)?;
+                // { ... }
+                if ch == '{' {
+                    try_parse_literal_exports(state)?;
+                    return Ok(());
+                }
+
+                // require('...')
+                if ch == 'r' {
+                    try_parse_require(state, RequireType::ExportAssign)?;
+                }
+            }
+        }
+        _ => {}
+    };
+    state.i = revert_pos;
+    Ok(())
+}
+
+fn try_parse_literal_exports(state: &mut ParseState) -> Result<(), ParseError> {
+    todo!()
 }
 
 fn try_parse_import_statement(state: &mut ParseState) -> Result<(), ParseError> {
