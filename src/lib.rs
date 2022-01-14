@@ -389,7 +389,16 @@ fn parse_cjs(input: &str) -> Result<(), ParseError> {
         }
     }
 
+    let mut first = true;
+    let mut skip_set_last_token = false;
+    let mut last_slash_was_division = false;
+
     while state.i < len - 1 {
+        if first {
+            first = false;
+        } else {
+            state.i += 1;
+        }
         let ch = state.src[state.i];
 
         if ch == b' ' || (ch < 14 && ch > 8) {
@@ -400,7 +409,7 @@ fn parse_cjs(input: &str) -> Result<(), ParseError> {
             match ch as char {
                 'i' => {
                     if keyword_start(state.src, state.i)
-                        && &state.src[state.i + 1..state.i + 5] == b"mport"
+                        && &state.src[state.i + 1..state.i + 6] == b"mport"
                     {
                         error_if_import_statement(&mut state)?;
                     }
@@ -419,7 +428,7 @@ fn parse_cjs(input: &str) -> Result<(), ParseError> {
                 }
                 '_' => {
                     if (keyword_start(state.src, state.i) || state.src[state.i - 1] == b'.')
-                        && &state.src[state.i + 1..state.i + 23] == b"interopRequireWildcard"
+                        && &state.src[state.i + 1..state.i + 24] == b"interopRequireWildcard"
                     {
                         let start_pos = state.i;
                         state.i += 23;
@@ -442,7 +451,7 @@ fn parse_cjs(input: &str) -> Result<(), ParseError> {
                         && &state.src[state.i + 1..state.i + 8] == b"_export"
                     {
                         state.i += 8;
-                        if &state.src[state.i + 1..state.i + 4] == b"Star" {
+                        if &state.src[state.i + 1..state.i + 5] == b"Star" {
                             state.i += 4;
                         }
                         if state.src[state.i] == b'(' {
@@ -466,29 +475,143 @@ fn parse_cjs(input: &str) -> Result<(), ParseError> {
         }
 
         match ch as char {
-            'e' => {}
-            'c' => {}
-            'm' => {}
-            'O' => {}
-            '(' => {}
-            ')' => {}
-            '{' => {}
-            '}' => {}
-            '>' => {}
-            '\'' | '"' => {}
-            '/' => {}
-            '`' => {}
+            'e' => {
+                todo!()
+            }
+            'c' => {
+                if keyword_start(state.src, state.i)
+                    && &state.src[state.i + 1..state.i + 5] == b"lass"
+                    && is_br_or_ws(state.src[state.i + 5])
+                {
+                    state.next_brace_is_class = true;
+                }
+            }
+            'm' => {
+                todo!()
+            }
+            'O' => {
+                todo!()
+            }
+            '(' => {
+                state
+                    .open_token_index_stack
+                    .resize(state.open_token_depth + 1, 0);
+                state.open_token_index_stack[state.open_token_depth] = state.last_token_index;
+                state.open_token_depth += 1;
+            }
+            ')' => {
+                if state.open_token_depth == 0 {
+                    return Err(ParseError::from_source_and_index(input, state.i));
+                }
+                // state.open_token_index_stack.pop();
+                state.open_token_depth -= 1;
+            }
+            '{' => {
+                state
+                    .open_class_index_stack
+                    .resize(state.open_token_depth + 1, false);
+                state.open_class_index_stack[state.open_token_depth] = state.next_brace_is_class;
+                state.next_brace_is_class = false;
+                state
+                    .open_token_index_stack
+                    .resize(state.open_token_depth + 1, 0);
+                state.open_token_index_stack[state.open_token_depth] = state.last_token_index;
+                state.open_token_depth += 1;
+            }
+            '}' => {
+                if state.open_token_depth == 0 {
+                    return Err(ParseError::from_source_and_index(input, state.i));
+                }
+                state.open_token_depth -= 1;
+                if let Some(td) = state.template_depth {
+                    if state.open_token_depth == td {
+                        state.template_depth = state.template_stack.pop();
+                        template_string(&mut state)?;
+                    } else {
+                        if state.open_token_depth < td {
+                            return Err(ParseError::from_source_and_index(input, state.i));
+                        }
+                    }
+                }
+            }
+            '>' => {
+                // TODO: <!--- XML comment support
+                break;
+            }
+            '\'' => {
+                single_quote_string(&mut state)?;
+            }
+            '"' => {
+                double_quote_string(&mut state)?;
+            }
+            '/' => {
+                let next_ch = state.src[state.i + 1] as char;
+                if next_ch == '/' {
+                    line_comment(&mut state)?;
+                    // dont update lastToken
+                    skip_set_last_token = true;
+                } else if next_ch == '*' {
+                    block_comment(&mut state)?;
+                    // dont update lastToken
+                    skip_set_last_token = true;
+                } else {
+                    // Division / regex ambiguity handling based on checking backtrack analysis of:
+                    // - what token came previously (lastToken)
+                    // - if a closing brace or paren, what token came before the corresponding
+                    //   opening brace or paren (lastOpenTokenIndex)
+                    let last_token = if state.last_token_index == usize::MAX {
+                        '\0'
+                    } else {
+                        state.src[state.last_token_index] as char
+                    };
+                    if last_token == '\u{0}'
+                        || is_expression_punctuator(last_token as u8)
+                            && !(last_token == '.'
+                                && (state.last_token_index > 1
+                                    && state.src[state.last_token_index - 1] >= b'0'
+                                    && state.last_token_index > 1
+                                    && state.src[state.last_token_index - 1] <= b'9'))
+                            && !(last_token == '+'
+                                && state.last_token_index > 1
+                                && state.src[state.last_token_index - 1] == b'+')
+                            && !(last_token == '-'
+                                && state.last_token_index > 1
+                                && state.src[state.last_token_index - 1] == b'-')
+                        || last_token == ')'
+                            && is_paren_keyword(
+                                state.src,
+                                state.open_token_index_stack[state.open_token_depth],
+                            )
+                        || last_token == '}'
+                            && (is_expression_terminator(
+                                state.src,
+                                state.open_token_index_stack[state.open_token_depth],
+                            ) || state.open_class_index_stack[state.open_token_depth])
+                        || is_expression_keyword(state.src, state.last_token_index)
+                        || last_token == '/' && last_slash_was_division
+                    {
+                        regular_expression(&mut state)?;
+                        last_slash_was_division = false;
+                    } else {
+                        last_slash_was_division = true;
+                    }
+                }
+            }
+            '`' => {
+                template_string(&mut state)?;
+            }
             _ => {}
         };
-
-        state.last_token_index = state.i;
+        if skip_set_last_token {
+            skip_set_last_token = false;
+        } else {
+            state.last_token_index = state.i;
+        }
     }
 
-    // TODO:
-    // if (templateDepth !== -1)
-    // throw new Error('Unterminated template.');
-    // if (openTokenDepth)
-    //     throw new Error('Unterminated braces.');
+    if state.template_depth.is_some() || state.open_token_depth > 0 {
+        return Err(ParseError::from_source_and_index(input, state.i));
+    }
 
     return Ok(());
 }
